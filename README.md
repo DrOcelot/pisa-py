@@ -33,15 +33,18 @@ Then open `notebooks/eda.ipynb` and select the `.venv` interpreter.
 | `data/pisa_2022_subset.parquet` | Git LFS | 613,744 pupils × 482 columns, 128 MB |
 | `data/Codebook.csv` | git | Reviewer annotations; drives the column selection |
 | `data/pisa_varlabels.csv` | git | Variable name → question text |
-| `data/PISA_2022_student.parquet` | ignored | Full OECD file, 702 MB |
-| `data/CY08MSP_STU_QQQ.SAS7BDAT` | ignored | Raw OECD SAS export, 3.8 GB |
+| `data/PISA_2022_student.parquet` | Git LFS | Full OECD student file, 702 MB |
+| `data/PISA_2022_school.parquet` | Git LFS | Full OECD school file, 5 MB |
+| `data/CY08MSP_STU_QQQ.SAS7BDAT` | ignored | Raw OECD student SAS export, 3.8 GB |
+| `data/CY08MSP_SCH_QQQ.SAS7BDAT` | ignored | Raw OECD school SAS export, 40 MB |
 
 The subset holds every variable under investigation: identifiers, gender,
 parental education, all thirty plausible values, the final student weight,
 every variable carrying a reviewer comment in `Codebook.csv`, and every
-variable its `DISENGAGED` flag marks. The two ignored files are only needed to
-rebuild it, and are available from the
-[OECD PISA 2022 database](https://www.oecd.org/pisa/data/2022database/).
+variable its `DISENGAGED` flag marks. The raw SAS exports are gitignored
+(too large to be worth tracking even via LFS) and are available from the
+[OECD PISA 2022 database](https://www.oecd.org/pisa/data/2022database/);
+convert them to parquet to rebuild the full files above.
 
 To change what the subset carries, edit the `DISENGAGED` column in
 `Codebook.csv` (or the column lists in `src/pisa_py/io.py`) and rebuild:
@@ -51,8 +54,10 @@ make-subset
 ```
 
 That needs the raw parquet present, and rewrites the committed subset —
-so only do it when the selection actually changes. Each rebuild adds another
-~128 MB to LFS storage permanently, against a 1 GiB free quota.
+so only do it when the selection actually changes. Each rebuild adds
+another ~128 MB to LFS storage permanently. GitHub's free plan gives every
+repository 10 GiB of LFS storage (2 GiB per individual file), so there's
+plenty of headroom here.
 
 ## Layout
 
