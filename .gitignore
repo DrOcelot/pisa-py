@@ -1,10 +1,9 @@
 # --- Raw PISA source data -------------------------------------------------
-# Too large for git (4.1 GB SAS export, 736 MB parquet). Download from the
-# OECD PISA 2022 database; the committed analysis subset is built from these
-# by scripts/make_subset.py.
+# The SAS exports (4.1 GB student, 40 MB school) are too large for git even
+# via LFS. Download from the OECD PISA 2022 database and convert to parquet;
+# the parquet conversions themselves are tracked via LFS (see .gitattributes).
 data/*.SAS7BDAT
 data/*.sas7bdat
-data/PISA_2022_student.parquet
 
 # --- Python ---------------------------------------------------------------
 __pycache__/
