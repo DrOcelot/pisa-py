@@ -76,3 +76,38 @@ Concepts covered while reading through `src/pisa_py/io.py`.
 - `.method().method()` reads similarly to R's `|>`/`%>%` pipelines, but the
   mechanism differs — each `.method()` is a call defined on that object's
   class, not syntactic rewriting.
+
+## Jupyter/IPython display
+- A cell only auto-displays the value of its last top-level statement, and
+  only if that statement is a bare expression. A `for` loop is a statement,
+  not an expression — it has no value to display, so plot objects created
+  inside a loop body are silently discarded, not just the last one.
+- `IPython` is the interactive shell Jupyter's kernel is built on; it adds
+  rich output rendering, tab completion, magics, etc. on top of plain Python.
+- `IPython.display.display(obj)` manually triggers the same rich-rendering
+  Jupyter does automatically for a cell's last expression — usable anywhere,
+  any number of times, e.g. inside a loop: `display(plot_factor(...))`.
+
+## `repr()` vs `print()`/`str()`
+- `repr()` gives the unambiguous, "developer-facing" representation of a
+  value, showing things `str()`/`print()` hide — e.g. quote boundaries, so
+  `repr("Germany ")` reveals the trailing space as `'Germany '` where
+  `print("Germany ")` would just show `Germany `.
+
+## Debugging a blank/empty result
+- Work outward from the smallest suspect piece rather than guessing: check
+  the raw filter alone before blaming a wrapper function, `repr()` a value
+  before assuming a string mismatch, and check upstream data
+  (`is_not_null()` on the specific column) before assuming the plotting
+  code is wrong. Sometimes the "bug" is a genuine gap in the source data
+  (e.g. a survey question not asked in a particular country).
+
+## Polars `group_by` / percentage-within-group pattern
+- `frame.group_by([key, group]).agg(pl.len().alias("n"))` counts rows per
+  combination of `key` and `group`.
+- `.with_columns((pl.col("n") / pl.col("n").sum().over(group) * 100).alias("pct"))`
+  turns those counts into percentages *within* each `group` (`.over(...)`
+  computes the denominator per group without collapsing rows) — needed
+  whenever groups (e.g. countries) have different total respondent counts,
+  so raw counts alone aren't comparable.
+- `pl.count()` is deprecated in favour of `pl.len()`.

@@ -23,6 +23,7 @@ DATA_DIR = PROJECT_ROOT / "data"
 
 RAW_PARQUET = DATA_DIR / "PISA_2022_student.parquet"
 SUBSET_PARQUET = DATA_DIR / "pisa_2022_subset.parquet"
+SCHOOL_PARQUET = DATA_DIR / "PISA_2022_school.parquet"
 CODEBOOK_CSV = DATA_DIR / "Codebook.csv"
 VARLABELS_CSV = DATA_DIR / "pisa_varlabels.csv"
 
@@ -34,6 +35,7 @@ ID_COLS: list[str] = [
 
 DEMOGRAPHIC_COLS: list[str] = [
     "ST004D01T",  # Student (standardised) gender
+    "ESCS",       # Economic, social and cultural status (standardised)
 ]
 
 PARENTAL_EDUCATION_COLS: list[str] = [
@@ -46,31 +48,6 @@ PARENTAL_EDUCATION_COLS: list[str] = [
 FACTOR_COLS: list[str] = [
     "ST261Q03JA",  # Missed school because I was pregnant
     "ST261Q10JA",  # Missed school because I couldn't pay fees
-    "ST261Q11JA",  # Missed school because of natural disasters
-    "ST295Q01JA",  # Eat dinner
-    "ST251Q03JA",  # Rooms with a bath or shower
-    "ST251Q04JA",  # Flush toilet
-    "ST230Q01JA",  # Siblings
-    "ST016Q01NA",  # Slider bar, how you feel about life
-    "ST296Q04JA",  # Number of hours of homework a day
-    "ST272Q01JA",  # Quality of maths instruction
-]
-
-# Variables carrying a hand-written reviewer comment in the codebook (a bespoke
-# note in the troll, conjunction or disengagement columns), plus the partner
-# variables those notes name as conjunctions. This set also covers every
-# variable flagged TROLL=1.
-CODEBOOK_COMMENTED_COLS: list[str] = [
-    "ST251Q07JA",  # Works of art at home (troll: low-income pupils over-claiming)
-    "ST258Q01JA",  # Went without food for lack of money (conjunction w/ ST259Q01JA)
-    "ST259Q01JA",  # Where family sits on a wealth scale (conjunction w/ ST258Q01JA)
-    "ST261Q02JA",  # Missed school: suspended (troll: false bravado)
-    "ST300Q02JA",  # Family eat the main meal with you (conjunction w/ not eating)
-    "ST327Q02JA",  # Expects to complete ISCED level 3.3 (conjunction w/ ST327Q08JA)
-    "ST327Q06JA",  # Expects to complete ISCED level 6 (conjunction w/ ST327Q08JA)
-    "ST327Q08JA",  # Expects to complete ISCED level 8, i.e. a PhD (troll)
-    "ST331Q03JA",  # Effort put into giving accurate answers (troll)
-    "ST347Q02JA",  # School closed for another reason (conjunction w/ ST261Q11JA)
 ]
 
 # All ten plausible values per domain. PISA estimates must be computed across
@@ -92,39 +69,35 @@ CORE_COLS: list[str] = list(
             *DEMOGRAPHIC_COLS,
             *PARENTAL_EDUCATION_COLS,
             *FACTOR_COLS,
-            *CODEBOOK_COMMENTED_COLS,
             *PV_COLS,
             *WEIGHT_COLS,
         ]
     )
 )
 
+def load_school(path: Path = SCHOOL_PARQUET) -> pl.LazyFrame:
+    """Scan the OECD school file as a Polars LazyFrame.
+
+    The scan stays lazy, so selecting a handful of columns from the result
+    reads only those columns off disc.
+    """
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} not found. If you have just cloned, run `git lfs pull` to "
+            "fetch it; otherwise rebuild it with the `make-subset` command."
+        )
+    schldf = pl.scan_parquet(path)
+    schldf = schldf.select("CNTSCHID","SC016Q02TA")
+    return schldf
 
 def read_codebook(path: Path = CODEBOOK_CSV) -> pl.DataFrame:
     """Read the reviewer-annotated codebook, normalising its column names."""
     codebook = pl.read_csv(path, infer_schema_length=0, encoding="utf8-lossy")
     return codebook.rename({name: name.strip().lstrip("﻿") for name in codebook.columns})
 
-
-def disengagement_columns(path: Path = CODEBOOK_CSV) -> list[str]:
-    """Codebook variables whose DISENGAGED flag is set (1 or 2).
-
-    Read from the codebook rather than hard-coded, so editing `CODEBOOK_CSV`
-    and rebuilding is enough to change what the subset carries.
-    """
-    codebook = read_codebook(path)
-    flagged = (
-        codebook.filter(pl.col("DISENGAGED").str.strip_chars().is_in(["1", "2"]))
-        .get_column("NAME")
-        .str.strip_chars()
-        .to_list()
-    )
-    return list(dict.fromkeys(flagged))
-
-
 def subset_columns(codebook: Path = CODEBOOK_CSV) -> list[str]:
     """Every column the committed subset carries, in a stable order."""
-    return list(dict.fromkeys([*CORE_COLS, *disengagement_columns(codebook)]))
+    return list(dict.fromkeys([*CORE_COLS]))
 
 
 def variable_labels(path: Path = VARLABELS_CSV) -> dict[str, str]:
