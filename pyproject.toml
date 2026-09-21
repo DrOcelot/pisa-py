@@ -8,6 +8,7 @@ dependencies = [
     "pandas",
     "pyarrow",   # required by polars' .to_pandas()
     "plotnine",  # pulls in matplotlib
+    "pyreadstat", # reading SPSS .SAV files
 ]
 
 [project.optional-dependencies]
