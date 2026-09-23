@@ -2,8 +2,8 @@
 # The SAS exports (4.1 GB student, 40 MB school) are too large for git even
 # via LFS. Download from the OECD PISA 2022 database and convert to parquet;
 # the parquet conversions themselves are tracked via LFS (see .gitattributes).
-data/*.SAS7BDAT
-data/*.sas7bdat
+data/old/*
+data/spss/*
 
 # --- Python ---------------------------------------------------------------
 __pycache__/
