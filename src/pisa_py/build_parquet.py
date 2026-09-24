@@ -1,12 +1,13 @@
 '''Convert SPSS .SAV files to parquet. 
 '''
 
+import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import polars as pl
 import pyreadstat
-import time
 
 sch_22_path = Path(__file__).resolve().parents[2] / "data" / "spss" / "CY08MSP_SCH_QQQ.SAV"
 stu_22_path = Path(__file__).resolve().parents[2] / "data" / "spss" / "CY08MSP_STU_QQQ.SAV"
@@ -33,13 +34,16 @@ def add_missing_reasons(df: pd.DataFrame, var: str) -> pd.DataFrame:
 
 t0 = time.perf_counter()
 # This line chooses which dataset to use.
-sav = pyreadstat.read_sav(stu_22_path, metadataonly=False, user_missing=True)
+sav = pyreadstat.read_sav(sch_22_path, metadataonly=False, user_missing=True)
 print(time.perf_counter()-t0)
 
-t1 = time.perf_counter()
-for var in sav[0]:
-    add_missing_reasons(sav, var)
-print(time.perf_counter()-t1)
+pl_sav = pl.from_pandas(sav[0])
+print(pl_sav["SC014Q01TA"])
+
+# t1 = time.perf_counter()
+# for var in sav[0]:
+#     add_missing_reasons(sav, var)
+# print(time.perf_counter()-t1)
 
 n=0
 for col in sav[0].columns:
