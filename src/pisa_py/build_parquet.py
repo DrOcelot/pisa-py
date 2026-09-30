@@ -7,7 +7,6 @@ from pathlib import Path
 import pandas as pd
 import polars as pl
 import pyreadstat
-from polars_readstat import InformativeNullOpts, scan_readstat
 
 sch_22_path = Path(__file__).resolve().parents[2] / "data" / "spss" / "CY08MSP_SCH_QQQ.sav"
 stu_22_path = Path(__file__).resolve().parents[2] / "data" / "spss" / "CY08MSP_STU_QQQ.sav"
