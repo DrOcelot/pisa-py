@@ -11,8 +11,8 @@ import polars as pl
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
 
-STUDENT_SURVEY_FULL = DATA_DIR / "PISA_2022_student.parquet"
-SCHOOL_SURVEY_FULL = DATA_DIR / "PISA_2022_school.parquet"
+STUDENT_SURVEY_FULL = DATA_DIR / "built" / "student_22.parquet"
+SCHOOL_SURVEY_FULL = DATA_DIR / "built" / "school_22.parquet"
 
 # region Column groupings
 # PLausible values for all three domains
@@ -74,10 +74,27 @@ def build_school(path: Path = SCHOOL_SURVEY_FULL) -> pl.LazyFrame:
             "fetch it; otherwise rebuild it with the `make-subset` command."
         )
     schdf = pl.scan_parquet(path)
-    schdf = (
-        schdf.select(SCHOOL_COLS)
-        .rename({"SC016Q02TA": "school_fee_percentage"})
+    schschema = schdf.collect_schema().names()
+
+    schcols = (
+        SCHOOL_COLS
     )
+    rename_map = {
+                    "SC016Q02TA": "school_fee_percentage",
+                }
+    for col in schcols:
+        if f"{col}_missing_reason" in schschema:
+            schcols = schcols + [f"{col}_missing_reason"]
+            if col in rename_map:
+                add = {f"{col}_missing_reason": f"{rename_map[col]}_missing_reason"}
+                rename_map.update(add)
+    schdf = (
+        schdf.select(schcols)
+        .rename(
+            rename_map
+        )
+    )
+
     return schdf
 
 def build_student(path: Path = STUDENT_SURVEY_FULL) -> pl.LazyFrame:
@@ -91,30 +108,48 @@ def build_student(path: Path = STUDENT_SURVEY_FULL) -> pl.LazyFrame:
             f"{path} not found. If you have just cloned, run `git lfs pull` to "
             "fetch it; otherwise rebuild it with the `make-subset` command."
         )
+    
     studf = pl.scan_parquet(path)
+    stuschema = studf.collect_schema().names()
+
+    stucols = (
+        ID_COLS
+        + DEMOGRAPHIC_COLS
+        + PARENTAL_EDUCATION_COLS
+        + FACTOR_COLS
+        + PV_COLS
+        + WT_COLS
+        + FINAL_WEIGHT
+    )
+    rename_map = {
+                "W_FSTUWT": "final_student_weight",
+                **{f"W_FSTURWT{i}": f"replicate_student_weight_{i}" for i in range(1, 81)},
+                "ST004D01T": "gender",
+                "ST005Q01JA": "mother_education_highest",
+                "ST006Q01JA": "mother_has_phd",
+                "ST007Q01JA": "father_education_highest",
+                "ST008Q01JA": "father_has_phd",
+                "ST261Q03JA": "missed_school_pregnancy",
+                "ST261Q10JA": "missed_school_fees",
+                }
+    for col in stucols:
+        if f"{col}_missing_reason" in stuschema:
+            stucols = stucols + [f"{col}_missing_reason"]
+            if col in rename_map:
+                add = {f"{col}_missing_reason": f"{rename_map[col]}_missing_reason"}
+                rename_map.update(add)
     studf = (
         studf.select(
-            ID_COLS
-            + DEMOGRAPHIC_COLS
-            + PARENTAL_EDUCATION_COLS
-            + FACTOR_COLS
-            + PV_COLS
-            + WT_COLS
-            + FINAL_WEIGHT
+            stucols
         )
-        .rename(
-            {"W_FSTUWT": "final_student_weight",
-            **{f"W_FSTURWT{i}": f"replicate_student_weight_{i}" for i in range(1, 81)},
-            "ST004D01T": "gender",
-            "ST005Q01JA": "mother_education_highest",
-            "ST006Q01JA": "mother_has_phd",
-            "ST007Q01JA": "father_education_highest",
-            "ST008Q01JA": "father_has_phd",
-            "ST261Q03JA": "missed_school_pregnancy",
-            "ST261Q10JA": "missed_school_fees"}
+        .rename(            
+            rename_map
         )
     )
     return studf
 
 jndf = build_student().join(build_school(), on="CNTSCHID", how="left")
-print(jndf.columns)
+jndf.sink_parquet(
+    f"{DATA_DIR}/built/sch_stu_sub.parquet",
+    engine="streaming",
+)

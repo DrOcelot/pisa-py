@@ -179,3 +179,148 @@ Concepts covered while reading through `src/pisa_py/io.py`.
   whenever groups (e.g. countries) have different total respondent counts,
   so raw counts alone aren't comparable.
 - `pl.count()` is deprecated in favour of `pl.len()`.
+
+## Concepts covered while reading `src/pisa_py/build_parquet.py`
+
+### Eager vs lazy conversion
+- `pl.from_dataframe(pandas_df)` / `pl.LazyFrame(pandas_df)` isn't always
+  zero-copy — if even one column has an incompatible memory layout (e.g. a
+  pandas `object`/string column mixed among float64 columns), Polars falls
+  back to copying the *entire* frame, not just the incompatible columns.
+- Wrapping an already-fully-loaded pandas DataFrame in `pl.LazyFrame(...)`
+  doesn't make the underlying data lazy — laziness only covers operations
+  from that point forward; the source is already fully materialized. A
+  genuine lazy *source* (e.g. `scan_parquet`, or a purpose-built file
+  scanner) is a different thing from lazily wrapping already-eager data.
+
+### `Expr.replace_strict()`
+- The current Polars way to map values through a dict (pandas' `.map(dict)`
+  equivalent); plain `.replace()`'s implicit-dtype behavior and the older
+  `map_dict` are both deprecated/being phased out.
+- `default=` controls what happens for values not found in the mapping;
+  `return_dtype=` fixes the output type explicitly when branches would
+  otherwise produce mismatched types (e.g. raw numbers vs. category labels).
+
+### `pl.when/then/otherwise` composing with other expressions
+- `.then()`/`.otherwise()` accept any expression, not just literals — a
+  whole `pl.col(...).replace_strict(...)` chain can sit inside a branch,
+  mirroring `np.where(cond, a, b)`'s three-part shape.
+- Multiple expressions passed to the *same* `.with_columns(expr1, expr2, ...)`
+  call are evaluated independently against the same input frame — they
+  don't see each other's output, so argument order doesn't affect
+  correctness, only column order in the result.
+
+### `pl.Enum` vs `pl.Categorical` vs plain `Utf8`/`String`
+- A plain string column stores full text per row, repeated — for a column
+  with a small fixed set of repeated values (e.g. a handful of survey
+  labels repeated across hundreds of thousands of rows), this can cost
+  3-4x more memory than a compact/dictionary-style encoding.
+- `pl.Enum(categories)` needs a *unique* list of category values —
+  `list(dict.fromkeys(values))` dedupes while preserving order, reusing the
+  dedup trick from `io.py`. The dedup only applies to the category
+  vocabulary; the original mapping dict (which may have several keys
+  sharing one label) is untouched and still works correctly.
+- Mixing dtypes across `when/then/otherwise` branches (e.g. a numeric
+  fallback vs. an Enum-typed match) forces Polars to reconcile types —
+  sometimes via an implicit, deprecated cast. Choosing `default=`/
+  `return_dtype=` conditionally per-branch, matching the actual shape of
+  the data, avoids the deprecated path entirely rather than just
+  suppressing the warning.
+
+### Chained vs batched `.with_columns()`
+- Calling `.with_columns()` once per column inside a loop builds a much
+  deeper query plan than collecting all the expressions into one list and
+  calling `.with_columns(*all_exprs)` a single time — measurably slower and
+  more memory-hungry at scale, even though both are logically equivalent.
+
+### `sink_parquet()` and its `engine=` parameter
+- `sink_parquet` doesn't automatically guarantee streaming execution — its
+  `engine="auto"` default can silently pick the in-memory engine,
+  materializing the whole result before writing anything, which shows up as
+  "no disk writes at all until near the end" on a live resource monitor.
+- Forcing `engine="streaming"` explicitly doesn't guarantee every operation
+  in a query plan actually streams either — a feature can still add far
+  more memory overhead than expected even under a genuinely-streaming
+  engine, if its own implementation isn't optimized for the shape of data
+  involved (e.g. an unusually wide, many-column schema).
+
+### Debugging a memory crash methodically
+- "Runs without error" isn't the same as "correct" or "efficient" — check
+  actual dtypes and values (e.g. via a data viewer), not just the absence
+  of an exception. The eventual root cause this session was exactly this:
+  code that ran fine and produced correct values for months, just with a
+  quietly wasteful dtype nobody had checked.
+- Isolate variables one at a time (row batching vs. column batching,
+  chained vs. batched calls, engine choice, individual library features)
+  using synthetic data at matching scale, rather than changing several
+  things at once and guessing which one mattered.
+- A library's own benchmark claims (e.g. "under 1GB RAM for 500GB files")
+  may be measured on a much simpler case than your own — don't assume it
+  transfers without checking against your specific shape of data.
+
+### Git / GitHub pull request workflow
+- Fork → clone the fork (not the original repo) → create a branch → commit
+  → push to `origin` (your fork), not `upstream` (the original repo) →
+  open the PR from your fork's branch targeting `upstream`'s main branch.
+- `git add` stages a change (silent on success — check with `git status`,
+  not the absence of output); `git commit` is the separate step that
+  actually records it. Splitting them lets you choose exactly what goes
+  into a commit.
+- A PR description carries the *why*; a code comment isn't needed when the
+  diff itself is self-explanatory (e.g. a one-line consistency fix
+  mirroring an existing pattern elsewhere in the same file).
+
+## Concepts covered while writing `src/pisa_py/make.py`
+
+### `LazyFrame.collect_schema().names()` for existence checks
+- Same method used in `build_parquet.py`'s for-loop, reused here for a
+  different purpose: check whether a *derived* column name
+  (`f"{col}_missing_reason"`) actually exists in the file before trying to
+  `.select()` it, rather than hardcoding which source columns happen to
+  have missing-reason siblings (e.g. ID columns like `CNT` never do).
+  Computing this from the real schema means the logic keeps working if the
+  underlying data file changes, instead of silently going stale.
+
+### List concatenation vs. plain addition
+- `some_list + f"{x}"` raises `TypeError: can only concatenate list (not
+  "str") to list` — `+` between a list and anything else requires both
+  sides to be lists. Wrapping the single item in brackets
+  (`some_list + [f"{x}"]`) makes it a one-element list, which concatenates
+  fine. `list.append(x)` is the other option, but mutates in place instead
+  of producing a new list.
+
+### Name binding vs. copying for lists
+- `schcols = SCHOOL_COLS` does not copy the list — `schcols` and the
+  module-level `SCHOOL_COLS` point at the *same* list object. `schcols =
+  schcols + [...]` doesn't mutate that shared object though: `+` builds a
+  brand new list and rebinds the name `schcols` to it, leaving the original
+  `SCHOOL_COLS` untouched. (`.append()` would have mutated the shared
+  object in place instead — worth knowing which one a given pattern does.)
+- Mutating the name bound inside a `for col in stucols:` loop (via
+  reassignment, not in-place mutation) doesn't break the loop or cause
+  infinite iteration — the loop's iterator was already created over the
+  original list object when the loop started; rebinding the name `stucols`
+  partway through doesn't change what the iterator walks.
+
+### Deriving one rename dict from another
+- Pattern: give the raw→friendly rename dict a variable name
+  (`rename_map = {...}`) instead of writing it as an inline literal, so it
+  can be read back later. Then loop over the columns being selected, and
+  for any raw name that both (a) has a `_missing_reason` sibling in the
+  schema and (b) already has an entry in `rename_map`, add a matching
+  `f"{raw}_missing_reason": f"{friendly}_missing_reason"` entry via
+  `rename_map.update(...)`. Keeps the derived columns' names in sync with
+  their base column's friendly name without typing every pair by hand.
+
+### Inspecting a parquet file's per-column size
+- `pyarrow.parquet.ParquetFile(path).metadata` exposes row-group/column
+  detail that plain `polars` schema/row-count calls don't — each column
+  chunk's `.total_compressed_size` can be summed across row groups to see
+  which columns actually dominate a file's size on disk.
+- Applied here: in a 160MB export, the 80 replicate-weight columns
+  (`W_FSTURWT*`) alone accounted for ~96MB (60%) — more than the 30
+  plausible-value columns and far more than the handful of demographic
+  columns and their `_missing_reason` siblings (~0.4MB total) combined.
+  A file "feeling too big" is worth breaking down by column group before
+  assuming something's wrong — sometimes it's just that a few wide,
+  boilerplate column groups (replicate weights, here) genuinely dominate.

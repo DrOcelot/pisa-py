@@ -4,6 +4,7 @@
 # the parquet conversions themselves are tracked via LFS (see .gitattributes).
 data/old/*
 data/spss/*
+data/built/*
 
 # --- Python ---------------------------------------------------------------
 __pycache__/

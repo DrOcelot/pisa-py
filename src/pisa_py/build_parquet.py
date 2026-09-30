@@ -4,75 +4,96 @@
 import time
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import polars as pl
 import pyreadstat
+from polars_readstat import InformativeNullOpts, scan_readstat
 
-sch_22_path = Path(__file__).resolve().parents[2] / "data" / "spss" / "CY08MSP_SCH_QQQ.SAV"
-stu_22_path = Path(__file__).resolve().parents[2] / "data" / "spss" / "CY08MSP_STU_QQQ.SAV"
-out_path = Path(__file__).resolve().parents[2] / "data" / "built"
+sch_22_path = Path(__file__).resolve().parents[2] / "data" / "spss" / "CY08MSP_SCH_QQQ.sav"
+stu_22_path = Path(__file__).resolve().parents[2] / "data" / "spss" / "CY08MSP_STU_QQQ.sav"
+out_path_dir = Path(__file__).resolve().parents[2] / "data" / "built"
 
-def add_missing_reasons(df: pd.DataFrame, var: str) -> pd.DataFrame:
+in_paths = {
+    "school_22": sch_22_path, 
+    "student_22": stu_22_path, 
+    }
+
+def add_missing_reasons(meta: pd.DataFrame, var: str) -> list[pl.Expr]:
     """Add missing reasons to the school survey data."""
-    # grab data and metadata from whole spss file
-    data, meta = df
 
+    # gets the low end of the missing ranges if it exists. 
+    # If there is no missing datathere's nothing to do so returns 'data'.
     if(not (lo := meta.missing_ranges.get(var, [{'lo':False}])[0]["lo"])):
-        return data
-
-    # add an NaN column with missing reason to be populated later.
-    data.insert(data.columns.get_loc(var)+1, f"{var}_missing_reason", np.nan )
+        return []
 
     # makes a dictionary of all labels the variable has
     # if the var is numeric labels will be NaN for real values
     # if the var is categoric labels will not be NaN, instead they will match the categoric answer
     labels_dict = meta.variable_value_labels[var]
-    data[f"{var}_missing_reason"] = np.where(data[var]<lo, np.nan, data[var].map(labels_dict))
-    data[var] = np.where(data[var]>=lo, np.nan, data[var].map(labels_dict).fillna(data[var]))
-    return data
-
-t0 = time.perf_counter()
-# This line chooses which dataset to use.
-sav = pyreadstat.read_file_multiprocessing(pyreadstat.read_sav, sch_22_path, 23, metadataonly=False, user_missing=True)
-print("No chunk: ", time.perf_counter()-t0)
-
-
-
-
-# pl_sav = pl.from_pandas(sav[0])
-# print(pl_sav["SC014Q01TA"])
-
-# t1 = time.perf_counter()
-# for var in sav[0]:
-#     add_missing_reasons(sav, var)
-# print(time.perf_counter()-t1)
-
-# n=0
-# for col in sav[0].columns:
-#     if col.endswith("missing_reason"):
-#         n=n+1
-# print(n)
-
-
-
-def pol_missing_reasons(df: pd.DataFrame, var: str) -> pd.DataFrame:
-    """Add missing reasons to the school survey data."""
-    # grab data and metadata from whole spss file
-    data, meta = df
-
-    if(not (lo := meta.missing_ranges.get(var, [{'lo':False}])[0]["lo"])):
-        return data
-
-    # makes a dictionary of all labels the variable has
-    # if the var is numeric labels will be NaN for real values
-    # if the var is categoric labels will not be NaN, instead they will match the categoric answer
-    labels_dict = meta.variable_value_labels[var]
-
     
+    missing_col_expr = (
+        pl.when(pl.col(var) < lo)
+        .then(None)
+        .otherwise(
+            pl.col(var).replace_strict(
+                labels_dict, 
+                default= (None),
+                return_dtype= (
+                    pl.Enum(list(dict.fromkeys(labels_dict.values())))
+                    )
+            )
+        )
+        .alias(f"{var}_missing_reason")
+        )
+    update_col_expr = (
+        pl.when(pl.col(var) >= lo)
+        .then(None)
+        .otherwise(
+            pl.col(var).replace_strict(
+                labels_dict, 
+                default= (
+                    None
+                    if any(label < lo for label in labels_dict) 
+                    else pl.col(var)
+                    ),
+                return_dtype= (
+                    pl.Enum(list(dict.fromkeys(labels_dict.values()))) 
+                    if any(label < lo for label in labels_dict) 
+                    else pl.Float64
+                    )
+            )
+        )
+        .alias(var)
+    )    
+    return [missing_col_expr,update_col_expr]
 
+for path in in_paths:
+    in_path = in_paths[path]
+    out_path = path
+    # read sav 
+    t0 = time.perf_counter()
+    data, meta = pyreadstat.read_file_multiprocessing(
+        pyreadstat.read_sav, 
+        in_path, 23, 
+        metadataonly=False, 
+        user_missing=True
+        )
+    print(f"{in_path.name} read time: ", time.perf_counter()-t0)
 
+    data = pl.LazyFrame(data)
 
-    data[f"{var}_missing_reason"] = np.where(data[var]<lo, np.nan, data[var].map(labels_dict))
-    data[var] = np.where(data[var]>=lo, np.nan, data[var].map(labels_dict).fillna(data[var]))
-    return data
+    # generate expressions list
+    t1 = time.perf_counter()
+    exprs = []
+    for col in data.collect_schema().names():
+        exprs.extend(add_missing_reasons(meta, col))
+    data = data.with_columns(*exprs)
+    print("For loop time: ", time.perf_counter()-t1)
+
+    #output parquet
+    t2 = time.perf_counter()
+    data.sink_parquet(
+        f"{out_path_dir}/{out_path}.parquet",
+        engine="streaming",
+        )
+    print(f"built/{out_path}.parquet sink time: ", time.perf_counter()-t2)
