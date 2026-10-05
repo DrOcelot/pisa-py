@@ -80,8 +80,8 @@ def build_school(path: Path = SCHOOL_SURVEY_FULL) -> pl.LazyFrame:
         SCHOOL_COLS
     )
     rename_map = {
-                    "SC016Q02TA": "school_fee_percentage",
-                }
+        "SC016Q02TA": "school_fee_percentage",
+    }
     for col in schcols:
         if f"{col}_missing_reason" in schschema:
             schcols = schcols + [f"{col}_missing_reason"]
@@ -122,16 +122,16 @@ def build_student(path: Path = STUDENT_SURVEY_FULL) -> pl.LazyFrame:
         + FINAL_WEIGHT
     )
     rename_map = {
-                "W_FSTUWT": "final_student_weight",
-                **{f"W_FSTURWT{i}": f"replicate_student_weight_{i}" for i in range(1, 81)},
-                "ST004D01T": "gender",
-                "ST005Q01JA": "mother_education_highest",
-                "ST006Q01JA": "mother_has_phd",
-                "ST007Q01JA": "father_education_highest",
-                "ST008Q01JA": "father_has_phd",
-                "ST261Q03JA": "missed_school_pregnancy",
-                "ST261Q10JA": "missed_school_fees",
-                }
+        "W_FSTUWT": "final_student_weight",
+        **{f"W_FSTURWT{i}": f"replicate_student_weight_{i}" for i in range(1, 81)},
+        "ST004D01T": "gender",
+        "ST005Q01JA": "mother_education_highest",
+        "ST006Q01JA": "mother_has_phd",
+        "ST007Q01JA": "father_education_highest",
+        "ST008Q01JA": "father_has_phd",
+        "ST261Q03JA": "missed_school_pregnancy",
+        "ST261Q10JA": "missed_school_fees",
+    }
     for col in stucols:
         if f"{col}_missing_reason" in stuschema:
             stucols = stucols + [f"{col}_missing_reason"]

@@ -324,3 +324,76 @@ Concepts covered while reading through `src/pisa_py/io.py`.
   A file "feeling too big" is worth breaking down by column group before
   assuming something's wrong — sometimes it's just that a few wide,
   boilerplate column groups (replicate weights, here) genuinely dominate.
+
+## Concepts covered while writing `src/pisa_py/build_features_parquet.py`
+
+### Chained `pl.when/then` as a vectorised switch-case
+- `.when()`/`.then()` pairs can be chained as many times as needed before
+  `.otherwise()` — Polars' row-wise if/elif/elif/else.
+- Branches are tried in order and the **first match wins**: a later
+  `.when()` only ever sees rows that no earlier branch claimed. So a later
+  branch doesn't need to repeat checks (e.g. null checks) that an earlier
+  branch already handled.
+- Once the earlier branches have peeled off every special case,
+  `.otherwise(value)` can replace a final explicit `.when()`. Trade-off:
+  shorter, but any unexpected value (e.g. a category that used to be
+  nulled out) silently gets that value; an explicit final branch +
+  `.otherwise(None)` leaves unexpected rows as visible nulls instead.
+- Building each flag as a standalone expression, collecting them in a
+  list, and doing one `.with_columns(*exprs)` at the end keeps the query
+  plan shallow (same lesson as chained vs batched `.with_columns()`).
+- Two expressions with the same `.alias()` in one `.with_columns()` call
+  raises a `DuplicateError` — watch for copy-pasted aliases.
+
+### `=` vs `==` inside a call
+- Inside a function call's parentheses, `name=value` is keyword-argument
+  syntax, so `pl.when(pl.col("x") = "a")` fails with "expected a parameter
+  name" — the comparison needs `==`.
+- Python has no `===`/`!==` (that's JavaScript); `==`/`!=` are all there is.
+
+### `&` / `|` vs `and` / `or`
+- Python has no `&&`/`||`. `and`/`or`/`not` work on single True/False
+  values; `&`/`|`/`~` are bitwise operators that Polars overloads to work
+  row-by-row on boolean expressions. Each side needs its own parentheses,
+  because `&`/`|` bind more tightly than `==`.
+
+### Methods vs method calls
+- `expr.is_null` (no brackets) is valid Python — it evaluates to the
+  method object itself, not a result. Polars then errors with "cannot
+  create expression literal for value of type method". The `()` is what
+  actually calls it.
+- `.is_null()` on an expression returns another expression (a per-row
+  boolean mask), not a single True/False.
+
+### Functions are first-class objects
+- A function is a value like any other: it can be bound to another name
+  (`hog = print; hog("dog")`), stored in a dict/list, or passed into
+  another function — e.g. `sorted(words, key=len)`, pandas `.apply(func)`,
+  same idea as R's `sapply(x, mean)` / `purrr::map(x, mean)`.
+- Polars expressions are values too, so a helper function can take
+  expressions (conditions) as arguments.
+
+### Null in comparisons: three-valued logic
+- Plain Python: `None == "Male"` is `False`, `None != "Male"` is `True`.
+- Polars (like SQL, and R's `NA`) treats null as "unknown": any comparison
+  with null gives null, and a null `when` condition counts as no match.
+- `&`/`|` with null follow the "does the unknown matter?" rule:
+  `null | True` → `True`, `null | False` → null, `null & False` → `False`,
+  `null & True` → null.
+- `.is_null()` / `.is_not_null()` are the way to get a definite
+  True/False about nulls.
+
+### `list.append` vs `list.extend`
+- `.extend(iterable)` adds each item *of* a collection (used in
+  `build_parquet.py` because `add_missing_reasons` returns a list of
+  expressions). `.append(item)` adds one item. Passing a single `pl.Expr`
+  to `.extend()` fails with `TypeError: 'Expr' object is not iterable`.
+
+### Check the actual values before writing parsing logic
+- Before reaching for regex/string-stripping, look at what an Enum column
+  really contains (`group_by(col).len()`). Here `*_education_highest`
+  (PISA ST005/ST007) only covers *schooling* levels (all ISCED 3.4 or
+  below) — degrees are separate questions — so no number extraction was
+  needed, and "highest schooling 3.4 + has a PhD" is consistent, not a
+  contradiction. ISCED 3.3 (OECD: "upper secondary with no direct access
+  to tertiary education") or below + PhD is the real contradiction.
