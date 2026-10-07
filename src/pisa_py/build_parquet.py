@@ -1,10 +1,10 @@
 '''Convert SPSS .SAV files to parquet. 
 '''
 
+import os
 import time
 from pathlib import Path
 
-import pandas as pd
 import polars as pl
 import pyreadstat
 
@@ -17,13 +17,15 @@ in_paths = {
     "student_22": stu_22_path, 
     }
 
-def add_missing_reasons(meta: pd.DataFrame, var: str) -> list[pl.Expr]:
+def add_missing_reasons(meta: pyreadstat.metadata_container, var: str) -> list[pl.Expr]:
     """Add missing reasons to the school survey data."""
 
     # gets the low end of the missing ranges if it exists. 
     # If there is no missing datathere's nothing to do so returns 'data'.
-    if(not (lo := meta.missing_ranges.get(var, [{'lo':False}])[0]["lo"])):
+    ranges = meta.missing_ranges.get(var)
+    if not ranges or not isinstance(first := ranges[0], dict):
         return []
+    lo = first["lo"]
 
     # makes a dictionary of all labels the variable has
     # if the var is numeric labels will be NaN for real values
@@ -66,33 +68,41 @@ def add_missing_reasons(meta: pd.DataFrame, var: str) -> list[pl.Expr]:
     )    
     return [missing_col_expr,update_col_expr]
 
-for path in in_paths:
-    in_path = in_paths[path]
-    out_path = path
-    # read sav 
-    t0 = time.perf_counter()
-    data, meta = pyreadstat.read_file_multiprocessing(
-        pyreadstat.read_sav, 
-        in_path, 23, 
-        metadataonly=False, 
-        user_missing=True
-        )
-    print(f"{in_path.name} read time: ", time.perf_counter()-t0)
+def main() -> None:
+    for path in in_paths:
+        in_path = in_paths[path]
+        out_path = path
+        # read sav 
+        t0 = time.perf_counter()
+        data, meta = pyreadstat.read_file_multiprocessing(
+            pyreadstat.read_sav, 
+            in_path,
+            num_processes= ((os.cpu_count() or 2) - 1), 
+            metadataonly=False,
+            user_missing=True,
+            output_format="polars",
+            )
+        print(f"{in_path.name} read time: ", time.perf_counter()-t0)
 
-    data = pl.LazyFrame(data)
+        assert isinstance(data, pl.DataFrame)
+        data = data.lazy()
 
-    # generate expressions list
-    t1 = time.perf_counter()
-    exprs = []
-    for col in data.collect_schema().names():
-        exprs.extend(add_missing_reasons(meta, col))
-    data = data.with_columns(*exprs)
-    print("For loop time: ", time.perf_counter()-t1)
+        # generate expressions list
+        t1 = time.perf_counter()
+        exprs: list[pl.Expr] = []
+        for col in data.collect_schema().names():
+            exprs.extend(add_missing_reasons(meta, col))
+        data = data.with_columns(*exprs)
+        print("For loop time: ", time.perf_counter()-t1)
 
-    #output parquet
-    t2 = time.perf_counter()
-    data.sink_parquet(
-        f"{out_path_dir}/{out_path}.parquet",
-        engine="streaming",
-        )
-    print(f"built/{out_path}.parquet sink time: ", time.perf_counter()-t2)
+        #output parquet
+        t2 = time.perf_counter()
+        data.sink_parquet(
+            f"{out_path_dir}/{out_path}.parquet",
+            engine="streaming",
+            mkdir=True,
+            )
+        print(f"built/{out_path}.parquet sink time: ", time.perf_counter()-t2)
+
+if __name__ == "__main__":
+    main()
