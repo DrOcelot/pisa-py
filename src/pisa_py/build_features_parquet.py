@@ -7,12 +7,7 @@ DATA_DIR = PROJECT_ROOT / "data"
 
 JOINED_SURVEY_SUB = DATA_DIR / "built" / "sch_stu_sub.parquet"
 
-joined_lf = pl.scan_parquet(JOINED_SURVEY_SUB)
-
-def add_troll_flags(lf: pl.LazyFrame) -> pl.LazyFrame:
-    troll_lf = lf
-    exprs = []
-
+def make_mp_flag_expr() -> pl.Expr:
     ''' 
     if pupil is male and says missed school because pregnant
     then flag mptroll = 1. If they weren't asked the question
@@ -37,9 +32,11 @@ def add_troll_flags(lf: pl.LazyFrame) -> pl.LazyFrame:
         .then(0)
         .otherwise(-1)
         .alias("mptroll")
+        .cast(pl.Int8)
     )
-    exprs.append(mp_expr)
+    return mp_expr
 
+def make_mdr_flag_expr() -> pl.Expr:
     '''
     if pupil said their mother's highest education is less than ISCED3.3 
     which is leaving school with a route that does not lead to higher education
@@ -63,9 +60,11 @@ def add_troll_flags(lf: pl.LazyFrame) -> pl.LazyFrame:
         .then(0)
         .otherwise(-1)
         .alias("mdrtroll")
+        .cast(pl.Int8)
     )
-    exprs.append(mdr_expr)
-    
+    return mdr_expr
+
+def make_fdr_flag_expr() -> pl.Expr:
     '''
     ddrtroll flagging done the same as mdrtroll
     (father_education_highest)(father_has_phd)
@@ -85,9 +84,11 @@ def add_troll_flags(lf: pl.LazyFrame) -> pl.LazyFrame:
         .then(0)        
         .otherwise(-1)
         .alias("fdrtroll")
+        .cast(pl.Int8)
     )
-    exprs.append(fdr_expr)
-    
+    return fdr_expr
+
+def make_fee_flag_expr() -> pl.Expr:
     '''
     if a pupil said they missed school because they couldn't afford fees
     and their school recived 0% of funding from school fees then
@@ -110,15 +111,31 @@ def add_troll_flags(lf: pl.LazyFrame) -> pl.LazyFrame:
             .then(0)
             .otherwise(-1)
             .alias("feetroll")
+            .cast(pl.Int8)
         )
-    exprs.append(fee_expr)
+    return fee_expr
+
+def add_troll_flags(lf: pl.LazyFrame) -> pl.LazyFrame:
+    troll_lf = lf
+    exprs = []
+
+    exprs.append(make_mp_flag_expr())
+    exprs.append(make_mdr_flag_expr())    
+    exprs.append(make_fdr_flag_expr())    
+    exprs.append(make_fee_flag_expr())
 
     troll_lf = troll_lf.with_columns(*exprs)
     return troll_lf
 
-troll = add_troll_flags(joined_lf)
+def main() -> None:
+    joined_lf = pl.scan_parquet(JOINED_SURVEY_SUB)
 
-troll.sink_parquet(
-    f"{DATA_DIR}/built/troll.parquet",
-    engine="streaming",
-)
+    troll = add_troll_flags(joined_lf)
+
+    troll.sink_parquet(
+        f"{DATA_DIR}/built/troll.parquet",
+        engine="streaming",
+    )
+
+if __name__ == "__main__":
+    main()

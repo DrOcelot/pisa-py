@@ -146,8 +146,12 @@ def build_student(path: Path = STUDENT_SURVEY_FULL) -> pl.LazyFrame:
     )
     return studf
 
-jndf = build_student().join(build_school(), on="CNTSCHID", how="left")
-jndf.sink_parquet(
-    f"{DATA_DIR}/built/sch_stu_sub.parquet",
-    engine="streaming",
-)
+def main() -> None:
+    jndf = build_student().join(build_school(), on="CNTSCHID", how="left")
+    jndf.sink_parquet(
+        f"{DATA_DIR}/built/sch_stu_sub.parquet",
+        engine="streaming",
+    )
+
+if __name__ == "__main__":
+    main()
