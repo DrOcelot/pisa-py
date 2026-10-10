@@ -9,7 +9,7 @@ whether that concentrates among low-performing pupils.
 ```bash
 git clone https://github.com/DrOcelot/pisa-py.git
 cd pisa-py
-uv sync --extra dev
+uv sync
 ```
 
 ## Data
@@ -68,12 +68,15 @@ and `0` means the check doesn't apply (an answer is missing, or for
 src/pisa_py/build_parquet.py           SPSS -> parquet, missing-value handling
 src/pisa_py/build_sub_parquet.py       Column selection, renaming, school join
 src/pisa_py/build_features_parquet.py  Inconsistency flags
+tests/test_build_features.py           Tests for the inconsistency flags
 teach/learnt.md                        Learning notes
 ```
 
 ## Development
 
 ```bash
-uv run ruff check src     # lint
-uv run mypy src           # type check (strict)
+uv run pytest                   # tests
+uv run ruff check src tests     # lint
+uv run ruff format src tests    # format
+uv run mypy src tests           # type check (strict)
 ```

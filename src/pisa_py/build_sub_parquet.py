@@ -1,8 +1,8 @@
-'''Pull together the school and student surveys 
+"""Pull together the school and student surveys
 into a single lazyframe that contains all the variables of use
-and then export it to a parquet file. These variable conjunctions are ones that can explicitly be 
-described as impossible to be true so indicate a pupil whol is "trolling" 
-or not paying attention to the survey.'''
+and then export it to a parquet file. These variable conjunctions are ones that can explicitly be
+described as impossible to be true so indicate a pupil whol is "trolling"
+or not paying attention to the survey."""
 
 from pathlib import Path
 
@@ -16,21 +16,17 @@ SCHOOL_SURVEY_FULL = DATA_DIR / "built" / "school_22.parquet"
 
 # region Column groupings
 # PLausible values for all three domains
-PV_COLS: list[str] = [
-    f"PV{i}{domain}" for domain in ("MATH", "READ", "SCIE") for i in range(1, 11)
-]
+PV_COLS: list[str] = [f"PV{i}{domain}" for domain in ("MATH", "READ", "SCIE") for i in range(1, 11)]
 
 # weight columns and final student weight
-WT_COLS: list[str] = [
-    f"W_FSTURWT{i}" for i in range(1, 81)
-]
+WT_COLS: list[str] = [f"W_FSTURWT{i}" for i in range(1, 81)]
 
 # Final student weight
-FINAL_WEIGHT: list[str] = ["W_FSTUWT"]  
+FINAL_WEIGHT: list[str] = ["W_FSTUWT"]
 
 # Country ID,Pupil ID and School ID Cols
 ID_COLS: list[str] = [
-    "CNT",       # Country name
+    "CNT",  # Country name
     "CNTSCHID",  # Unique school id
     "CNTSTUID",  # Unique student id
 ]
@@ -38,7 +34,7 @@ ID_COLS: list[str] = [
 # Gender and socio-economics status.
 DEMOGRAPHIC_COLS: list[str] = [
     "ST004D01T",  # Student (standardised) gender
-    "ESCS",       # Economic, social and cultural status (standardised)
+    "ESCS",  # Economic, social and cultural status (standardised)
 ]
 
 # Parental education information. A parent with a PhD should have completed a degree.
@@ -58,9 +54,10 @@ FACTOR_COLS: list[str] = [
 # School ID to match to pupil and an indicator of if the school is fee paying.
 SCHOOL_COLS: list[str] = [
     "CNTSCHID",
-    "SC016Q02TA"   # percentage fees
+    "SC016Q02TA",  # percentage fees
 ]
 # endregion
+
 
 def build_school(path: Path = SCHOOL_SURVEY_FULL) -> pl.LazyFrame:
     """Scan the OECD school file as a Polars LazyFrame.
@@ -75,9 +72,7 @@ def build_school(path: Path = SCHOOL_SURVEY_FULL) -> pl.LazyFrame:
     schdf = pl.scan_parquet(path)
     schschema = schdf.collect_schema().names()
 
-    schcols = (
-        SCHOOL_COLS
-    )
+    schcols = SCHOOL_COLS
     rename_map = {
         "SC016Q02TA": "school_fee_percentage",
     }
@@ -87,14 +82,10 @@ def build_school(path: Path = SCHOOL_SURVEY_FULL) -> pl.LazyFrame:
             if col in rename_map:
                 add = {f"{col}_missing_reason": f"{rename_map[col]}_missing_reason"}
                 rename_map.update(add)
-    schdf = (
-        schdf.select(schcols)
-        .rename(
-            rename_map
-        )
-    )
+    schdf = schdf.select(schcols).rename(rename_map)
 
     return schdf
+
 
 def build_student(path: Path = STUDENT_SURVEY_FULL) -> pl.LazyFrame:
     """Scan the OECD student file as a Polars LazyFrame.
@@ -136,15 +127,9 @@ def build_student(path: Path = STUDENT_SURVEY_FULL) -> pl.LazyFrame:
             if col in rename_map:
                 add = {f"{col}_missing_reason": f"{rename_map[col]}_missing_reason"}
                 rename_map.update(add)
-    studf = (
-        studf.select(
-            stucols
-        )
-        .rename(            
-            rename_map
-        )
-    )
+    studf = studf.select(stucols).rename(rename_map)
     return studf
+
 
 def main() -> None:
     jndf = build_student().join(build_school(), on="CNTSCHID", how="left")
@@ -152,6 +137,7 @@ def main() -> None:
         f"{DATA_DIR}/built/sch_stu_sub.parquet",
         engine="streaming",
     )
+
 
 if __name__ == "__main__":
     main()
