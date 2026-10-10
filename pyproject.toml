@@ -19,9 +19,6 @@ dev = [
     "ruff",
 ]
 
-[project.scripts]
-make-subset = "pisa_py.io:main"
-
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

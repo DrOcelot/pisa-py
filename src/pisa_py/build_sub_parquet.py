@@ -70,8 +70,7 @@ def build_school(path: Path = SCHOOL_SURVEY_FULL) -> pl.LazyFrame:
     """
     if not path.exists():
         raise FileNotFoundError(
-            f"{path} not found. If you have just cloned, run `git lfs pull` to "
-            "fetch it; otherwise rebuild it with the `make-subset` command."
+            f"{path} not found. Build it with `python -m pisa_py.build_parquet`."
         )
     schdf = pl.scan_parquet(path)
     schschema = schdf.collect_schema().names()
@@ -105,10 +104,9 @@ def build_student(path: Path = STUDENT_SURVEY_FULL) -> pl.LazyFrame:
     """
     if not path.exists():
         raise FileNotFoundError(
-            f"{path} not found. If you have just cloned, run `git lfs pull` to "
-            "fetch it; otherwise rebuild it with the `make-subset` command."
+            f"{path} not found. Build it with `python -m pisa_py.build_parquet`."
         )
-    
+
     studf = pl.scan_parquet(path)
     stuschema = studf.collect_schema().names()
 

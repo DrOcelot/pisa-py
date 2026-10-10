@@ -1,7 +1,7 @@
-# --- Raw PISA source data -------------------------------------------------
-# The SAS exports (4.1 GB student, 40 MB school) are too large for git even
-# via LFS. Download from the OECD PISA 2022 database and convert to parquet;
-# the parquet conversions themselves are tracked via LFS (see .gitattributes).
+# --- PISA data -------------------------------------------------------------
+# The OECD SPSS files (2 GB student, 20 MB school) are too large for git.
+# Download them from the OECD PISA 2022 database; everything in data/built/
+# is rebuilt from them by the scripts in src/pisa_py/ (see README).
 data/old/*
 data/spss/*
 data/built/*
