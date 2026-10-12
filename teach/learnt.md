@@ -1,399 +1,494 @@
 # Learning log
 
-Concepts covered while reading through `src/pisa_py/io.py`.
+Where I am in learning Python, followed by reference notes on concepts
+covered so far, ordered from most fundamental to most niche.
 
-## `pathlib.Path`
-- Object-oriented filesystem paths; `Path(...)` doesn't touch disk on its own.
-- `/` joins path segments (`Path.__truediv__`, operator overloading — not division).
-- `Path(__file__)` is the path to the current module's own file.
-- `.parent` / `.parents[n]` walk up the directory tree; `.parents[0] == .parent`.
-- `.resolve()` makes a path absolute.
-- `.exists()`, `.mkdir(parents=True, exist_ok=True)` for filesystem checks/setup.
+## Progress
 
-## Strings and comments
+**Background:** comes to Python from R (tidyverse pipes, dplyr, `NA`) and
+some JavaScript, so new ideas land best when compared to those (`|>`,
+`OVER (PARTITION BY)`, JS `...` and `? :`). Learning through a real data
+project (survey data, Polars, parquet) rather than standalone exercises.
+
+**Journey so far** (started Sept 2026):
+1. **Reading existing code.** Walked through working modules line by line
+   to learn core syntax (paths, comprehensions, unpacking, walrus, f-strings)
+   and the Polars mental model: expressions vs frames, lazy plans,
+   `group_by`/`agg`, `.over()`.
+2. **Exploring in Jupyter.** Plotting and debugging blank results; learnt to
+   narrow a problem down step by step and to check the data before the code.
+3. **Writing pipeline code.** Rewrote a pandas data build in Polars, which
+   meant chasing down a memory crash (dtypes, Enums, batched
+   `.with_columns()`, streaming engines) and opening a PR on an upstream
+   library. Then wrote new scripts: selecting and renaming columns from a
+   schema, and building derived flag columns with chained `when/then`.
+   Picked up list/dict mechanics and null logic along the way.
+4. **Code quality.** Tidying the project: `main()` and import
+   side effects, package layout, naming, refactoring into testable
+   functions, first pytest tests, mypy, and uv/VS Code tooling.
+5. **Batched build (current).** Rewrote the `.sav` → parquet build to read
+   in chunks with a generator and write a folder of part files. Hit (and
+   fixed) all-null chunks being typed `Null` by casting each chunk to the
+   metadata's dtypes. Discussed, but chose not to build, a process pool for
+   speed (not worth it for a build run a couple of times).
+
+**Comfortable with:** everyday syntax, lists/dicts, reading and writing
+Polars pipelines, reading tracebacks, basic pytest, consuming generators in
+a `for` loop.
+
+**Not yet covered:** classes and OOP, writing `try`/`except` handling,
+writing your own generators (`yield`), decorators, context managers
+(`with`) beyond using them, fixtures and parametrised tests, logging, type
+hints beyond the basics, `concurrent.futures` / multiprocessing in practice.
+
+---
+
+## 1. Python language
+
+### Comments, strings and docstrings
+- `#` is a true comment: discarded by the parser, never exists at runtime.
 - `"""..."""` is a real string literal, not a comment. In docstring position
   (first statement of a module/function/class) it becomes `.__doc__`.
-- `#` is a true comment, discarded by the parser, never exists at runtime.
+- `f"..."` evaluates any `{expr}` inside as real Python and stringifies the
+  result; without the `f`, `"{expr}"` is just literal text.
 - `.strip()` removes whitespace from both ends; `.lstrip(char)` removes a
   specific character from the left only (e.g. a UTF-8 BOM, `"﻿"`).
+- `repr()` gives the unambiguous, developer-facing form of a value, showing
+  what `str()`/`print()` hide: `repr("Germany ")` is `'Germany '`, revealing
+  the trailing space.
 
-## `dict` and unpacking
-- `dict.fromkeys(iterable)` builds a dict with each element as a key
-  (value `None`) — dedupes because dict keys are unique, and preserves
-  insertion order (Python 3.7+).
-- `*x` inside a list literal (`[*x, *y]`) unpacks/spreads `x`'s elements in
-  place, rather than nesting `x` as a single item — same idea as JS `...`.
-- Pattern used repeatedly in this file: `list(dict.fromkeys([*a, *b, ...]))`
-  = concatenate several lists, then dedupe while keeping order.
+### Syntax gotchas
+- `=` assigns; `==` compares. Inside a call's parentheses `name=value` is a
+  keyword argument, so `f(x = "a")` where a comparison was meant fails with
+  "expected a parameter name".
+- Python has no `===`/`!==` (JavaScript) and no `&&`/`||`; it has `==`/`!=`
+  and `and`/`or`/`not`.
+- `and`/`or`/`not` work on single True/False values. `&`/`|`/`~` are bitwise
+  operators that libraries like Polars overload to work element by element.
+  They bind more tightly than `==`, so each side needs its own parentheses:
+  `(a == 1) & (b == 2)`.
+- Python ignores indentation inside open brackets, so badly indented
+  arguments still run; formatters fix the look.
 
-## List comprehensions
-- Shape: `[<expression> for <item> in <iterable> if <condition>]`.
-- The leading expression and the loop variable are separate things — the
-  expression can be anything, not just the bare loop variable.
+### Expressions vs statements
+- Conditional (ternary) expression: `value_if_true if condition else
+  value_if_false`, like JS's `condition ? a : b` reordered to read like a
+  sentence.
+- Walrus operator `:=` (3.8+) assigns and evaluates to the value in one
+  expression: `if missing := [...]:` assigns `missing`, tests it, and leaves
+  it available inside the `if` block.
+- A `for` loop or assignment is a statement: it has no value.
 
-## The walrus operator `:=`
-- Assigns and evaluates to that value in one expression, e.g.
-  `if missing := [...]:` assigns `missing` and uses it as the condition,
-  so it's still available inside the `if` block. Python 3.8+.
+### Names, objects and binding
+- `a = b` doesn't copy; both names point at the *same* object. Mutating it
+  (`.append()`) is visible through both names. Rebinding (`a = a + [...]`)
+  builds a new object and points only `a` at it; `b` is untouched.
+- Rebinding a loop's source name inside `for x in xs:` doesn't affect the
+  loop: the iterator was created over the original object when the loop
+  started.
+- Functions are first-class objects: they can be bound to another name
+  (`hog = print`), stored in a list/dict, or passed into another function
+  (`sorted(words, key=len)`, like R's `sapply(x, mean)`).
+- `obj.method` (no brackets) is the method object itself, not a result; the
+  `()` is what calls it. Forgetting them often errors later and confusingly
+  (e.g. Polars: "cannot create expression literal for value of type method").
+- Method chaining (`.a().b()`) reads like R's `|>` pipes, but each call is a
+  method defined on the object returned by the previous one, not syntactic
+  rewriting.
 
-## Conditional (ternary) expression
-- `value_if_true if condition else value_if_false` — an expression, not a
-  statement. Equivalent in spirit to JS's `condition ? a : b`, reordered
-  to read like a sentence.
+### Lists
+- `list + list` concatenates into a new list; `list + "str"` raises
+  `TypeError: can only concatenate list (not "str") to list`. Wrap a single
+  item: `xs + [item]`.
+- `.append(item)` adds one item in place; `.extend(iterable)` adds each item
+  *of* a collection in place. `.extend()` on a non-iterable fails with
+  `TypeError: '...' object is not iterable`.
+- List comprehension: `[<expression> for <item> in <iterable> if <condition>]`.
+  The leading expression can be anything, not just the loop variable.
+- Every comprehension needs: the result expression, `for`, the loop
+  name(s), `in`, the iterable. Putting the iterable where the names go gives
+  mypy's confusing "Cannot assign to function call".
 
-## Exceptions
-- `raise SomeError(...)` immediately aborts normal execution and propagates
-  up the call stack — not a console print, a real interruption (unless
-  caught by `try`/`except`).
-- `KeyError` conventionally means "lookup not found"; reused here for
-  "requested column missing" even without a literal dict lookup.
+### Dicts and sets
+- Dict comprehension: `{key: value for k, v in d.items()}`. The key is the
+  *address* (e.g. which column); the value is what it maps to.
+- A plain dict is the tool for "look up X, get Y" in Python
+  (`{"double": pl.Float64, "string": pl.String}`); Polars dtypes are just
+  objects and can be dict values. `when/then` is for per-row *data* inside a
+  frame, not for translating Python values.
+- Chaining two dicts through a comprehension:
+  `{name: sounds[animal] for name, animal in pets.items()}` turns
+  name → animal and animal → sound into name → sound.
+- `dict.fromkeys(iterable)` makes each element a key (value `None`). Keys are
+  unique and keep insertion order (3.7+), so `list(dict.fromkeys(xs))` is the
+  standard "dedupe while keeping order" idiom.
+- `for k in d:` gives keys only. `.items()` gives `(key, value)` pairs,
+  `.keys()`/`.values()` one side each.
+- `d.update({...})` adds or overwrites entries in place. Naming a dict
+  (rather than writing it inline as a literal) lets you read it back and
+  derive new entries from it in a loop.
+- `set`: unordered, duplicate-free, built for fast (~O(1)) membership tests
+  (`x in s`), unlike a list (O(n)).
 
-## Polars-specific
-- Expressions (`pl.col(...)`) are lazy — they describe a plan, and only run
-  when passed to something that executes it (e.g. `.filter()`, `.collect()`).
-- Namespace accessors like `.str` (also `.dt`, `.list`) group type-specific
-  operations on an expression/column — not a type cast.
-- `.filter(...)` uses a boolean mask (one bool per row) to select rows;
-  the mask isn't stored as a column.
-- `pl.scan_parquet(...)` returns a `LazyFrame` — a plan over the file,
-  not loaded data. Lets column selection get pushed down to the reader.
-- `.sink_parquet(...)` executes a lazy plan and streams the result straight
-  to disk, without materializing the full result in memory first.
-- Row counts aren't free metadata like column names are — getting them
-  (`.select(pl.len()).collect().item()`) is a real, if cheap, computation.
+### Unpacking
+- `[*a, *b]` spreads iterables into a list literal (like JS `...`), so
+  `list(dict.fromkeys([*a, *b]))` = concatenate then dedupe.
+- `**d` spreads a dict into a dict literal or into keyword arguments
+  (`f(**{"a": 1})` is `f(a=1)`).
+- Loops over pairs unpack in the header: `for k, v in d.items():`,
+  `for x, y in zip(a, b):`, `for i, x in enumerate(xs):`.
+- `zip(...)` pairs iterables element by element into tuples (lazily);
+  `strict=True` (3.10+) raises on mismatched lengths instead of silently
+  truncating.
+- `a, b = x` iterates over `x` and needs *exactly* 2 items: 1 item gives
+  "not enough values to unpack (expected 2, got 1)", 3 gives "too many
+  values to unpack". Check *what level* you're unpacking: the whole
+  collection or each item in it.
+- `enumerate(xs)` yields `(count, item)` pairs, counting from 0
+  (`start=1` to change). Like R's `seq_along` but giving the item too.
+- Nested unpacking mirrors the shape with brackets:
+  `for i, (df, meta) in enumerate(pairs):`.
 
-## `set`
-- `set` as a noun: an unordered, duplicate-free collection type, built for
-  fast (~O(1)) membership testing (`x in a_set`), unlike `list` (O(n)).
+### Generators and iterators
+- A generator function uses `yield` instead of `return`. Calling it runs
+  *nothing*; it returns a generator object (a "dispenser"). Each time a
+  `for` loop asks for the next item, it runs up to the next `yield`, hands
+  that value over and pauses. Same idea as JS `function*`.
+- Memory win: only the current item needs to exist. When the loop name is
+  rebound to the next item, the old one can be freed.
+- Generators are sequential (one reader moving forward), so they can't be
+  shared out between parallel workers.
+- In docs, a **Yields:** heading (instead of **Returns:**) and a type hint
+  like `Iterator[tuple[A, B]]` mean "this is a generator; loop over it, and
+  each item looks like this".
 
-## `zip`
-- Pairs up multiple iterables element-by-element into tuples; lazy, usually
-  wrapped in `list(...)` or fed into `dict(...)`.
-- `strict=True` (3.10+) raises if the iterables have mismatched lengths,
-  instead of silently truncating.
+### Functions
+- A function defined inside another function is a local name, unreachable
+  from outside. Module-level functions are importable. (`global` is a
+  separate keyword for reassigning module-level variables.)
+- Mutable default trap: defaults are evaluated once at `def` time, so
+  `def f(x=[])` shares one list across calls. Use `x: list | None = None`,
+  then `if x is None: x = [...]` inside.
 
-## Method chaining
-- `.method().method()` reads similarly to R's `|>`/`%>%` pipelines, but the
-  mechanism differs — each `.method()` is a call defined on that object's
-  class, not syntactic rewriting.
+### Exceptions
+- `raise SomeError(...)` aborts normal execution and propagates up the call
+  stack (unless caught by `try`/`except`); it's not just a printed message.
+- Pick the conventional error type for the meaning, e.g. `KeyError` for
+  "requested thing not found", even without a literal dict lookup.
 
-## Concepts covered while reading `src/pisa_py/features.py`
+### Three-valued logic with null
+- Plain Python: `None == "x"` is `False`, `None != "x"` is `True`.
+- SQL, R's `NA` and Polars treat null as "unknown": any comparison with null
+  gives null. `&`/`|` follow "does the unknown matter?": `null | True` →
+  `True`, `null | False` → null, `null & False` → `False`, `null & True` →
+  null.
+- `.is_null()` / `.is_not_null()` are the way to get a definite True/False.
 
-### f-strings
-- `f"..."` evaluates any `{expr}` inside as real Python and stringifies the
-  result; without the `f` prefix, `"{expr}"` is just a literal 9-character
-  string, no evaluation at all.
+## 2. Modules, imports and project structure
 
-### Expressions vs LazyFrames
-- `pl.col(...)`, `pl.lit(...)`, `pl.when(...)`, `pl.mean_horizontal(...)` all
-  return an **expression** (`pl.Expr`) — a plan for one column's worth of
-  computation, not data and not a frame. It can't be `.collect()`-ed on its
-  own; it only means something once passed into a frame method.
-- Heuristic for telling expression vs. frame apart while reading: frame
-  methods are table-shaped (`.filter()`, `.select()`, `.with_columns()`,
-  `.group_by()`, `.join()`, `.drop()`); expression methods are column-shaped
-  (`.cast()`, `.alias()`, `.is_null()`, `.qcut()`, `.over()`). Anything passed
-  *as an argument into* a frame method is an expression.
+- Importing a module runs every top-level statement in it. Definitions
+  (constants, paths, `def`s) belong at module level; actions (reading data,
+  computing, writing files) belong inside `main()`, otherwise any import
+  triggers them (and breaks if, say, an input file doesn't exist yet).
+- `__name__` is `"__main__"` when a file is run directly (`python -m ...`) and
+  the import name otherwise, so `if __name__ == "__main__": main()` means
+  "only run when executed directly".
+- `import` takes a dotted module name, not a path: with a `src/` layout,
+  `src/pkg/mod.py` is imported as `pkg.mod`.
+- A distribution name (pip/uv) can use hyphens (`my-pkg`); the import name
+  can't (`my_pkg`).
+- Import order: standard library, then third-party, then your own code, with
+  blank lines between groups. `ruff check --fix` sorts them.
+- `pathlib.Path`: object-oriented paths; creating one doesn't touch disk.
+  `/` joins segments (operator overloading via `__truediv__`).
+  `Path(__file__)` is the current module's file; `.parent`/`.parents[n]` walk
+  up; `.resolve()` makes it absolute; `.name` is just the filename;
+  `.exists()` and `.mkdir(parents=True, exist_ok=True)` touch the disk.
+  Storing full `Path`s (rather than building strings in a loop) keeps code
+  simpler.
+- A `Path` doesn't know whether it's a file or a folder; that's only found
+  out from disk (`.is_dir()`). Trailing slashes are stripped
+  (`Path("a/") == Path("a")`), so write `DATA_DIR / "built" / "school_22"`.
+
+## 3. Writing readable code
+
+- Name = what it holds + what kind: `survey_df`, `survey_lf`,
+  `survey_metadata`. Don't name by type alone (`lazy_data`, `path_dict`);
+  type hints already say that.
+- Name dicts for the key → value relationship (`in_paths_out_paths`, "values
+  by key"). Check loop variable names against what they really hold.
+- Derive values from the source of truth instead of hardcoding them (e.g.
+  check a real schema for which columns exist) so code doesn't silently go
+  stale when the data changes.
+- YAGNI ("you aren't gonna need it"): don't add flexibility (extra optional
+  parameters etc.) until a real need shows up.
+- Refactor = same behaviour from outside, different structure inside.
+  Restructuring so code *can* be tested is fine (e.g. one function per
+  concern); changing behaviour to make a test pass isn't. Check: "would this
+  change make sense if the tests didn't exist?"
+- A code comment isn't needed when the code is self-explanatory; the *why* of
+  a change belongs in the commit message / PR description.
+- Fix bad data "at the door": correct it right after reading (e.g. casting
+  dtypes) rather than patching each downstream function, which can then
+  trust its input. Patching downstream also misses columns that never pass
+  through that function.
+- Weigh automation against how often it runs: halving a 10-minute build run
+  a couple of times isn't worth an hour of extra code and complexity.
+
+## 4. Errors, debugging and checking your work
+
+- Reading a traceback: start at the bottom `E` line for the actual error,
+  then find the last line in *your* file for where it was triggered. Library
+  frames in between can usually be skipped, though the `>` line sometimes
+  shows the exact rule that was broken.
+- "Runs without error" isn't "correct" or "efficient". Check actual values
+  and dtypes, not just the absence of an exception; wasteful choices (like a
+  bad dtype) can run fine for months.
+- Look at the real data before writing logic for it (e.g. list a column's
+  distinct values with counts before reaching for regex). It's often simpler
+  than assumed, and the source documentation (codebooks) defines what values
+  actually mean.
+- Work outward from the smallest suspect piece: test the raw operation
+  before blaming a wrapper, `repr()` a value before assuming a string
+  mismatch, check upstream data for nulls before blaming plotting code. The
+  "bug" is sometimes a genuine gap in the source data.
+- Change one variable at a time, using synthetic data at a matching scale,
+  rather than changing several things and guessing which mattered.
+- A library's benchmark claims may come from a simpler case than yours;
+  verify on your own data's shape.
+- If the last line of *your* file in a traceback is just a call (e.g. the
+  `for` line), and everything below it is library code, the failure is
+  inside the library, not in your logic.
+- An error that changes when you change a parameter (e.g. chunk size) is a
+  clue: work out what the parameter changes (e.g. how many items there are)
+  and compare it with the message.
+- Sparse data is often clustered: in a file sorted by country, a question
+  asked in only 4 countries has values in a few tight clumps, with huge
+  empty gaps between them. Any slice that lands in a gap is entirely null.
+
+## 5. Testing and type checking
+
+### pytest
+- pytest finds `test_*.py` files (in `tests/`) and runs functions named
+  `test_*`. A plain `assert` is the check; without one, a test only checks
+  "didn't crash".
+- Shape: arrange (tiny hand-made input + expected output), act (call the
+  code), assert (compare). Keep input inside the test so it reads on its
+  own; *fixtures* are for genuinely shared setup.
+- The most valuable test cases are ones that would fail if one specific
+  condition were removed from the code (each row proves one condition is
+  needed).
+- Change a test when the *intended* behaviour changes, never just to make it
+  go green.
+
+### mypy
+- Python lets a name be rebound to any type; mypy gives each variable one type
+  for its whole scope. `data = data.lazy()` (DataFrame → LazyFrame) is an
+  error, and mypy then also flags later uses.
+- Fix with one name per kind of thing (`survey_df` → `survey_lf`), not a
+  union annotation that pushes the problem downstream.
+
+## 6. Polars
+
+### Expressions vs frames
+- `pl.col(...)`, `pl.lit(...)`, `pl.when(...)`, `pl.mean_horizontal(...)` etc.
+  return an **expression** (`pl.Expr`): a plan for one column's worth of
+  computation. It can't be collected on its own; it means something only when
+  passed into a frame method.
+- Heuristic: frame methods are table-shaped (`.filter()`, `.select()`,
+  `.with_columns()`, `.group_by()`, `.join()`, `.drop()`); expression methods
+  are column-shaped (`.cast()`, `.alias()`, `.is_null()`, `.qcut()`,
+  `.over()`). Anything passed *into* a frame method is an expression.
+- Expressions are values, so helper functions can take and return them.
+- Methods on an expression return another expression, e.g. `.is_null()` is a
+  per-row boolean mask, not one True/False.
+- Namespace accessors (`.str`, `.dt`, `.list`) group type-specific
+  operations; they're not casts.
+
+### Selecting and adding columns
+- `select()` picks columns; `filter()` picks rows using a boolean mask (one
+  bool per row, not stored as a column), like dplyr/SQL. pandas' `.filter()`
+  is different: it picks by *label*.
 - `.with_columns(expr.alias("name"))` returns a new frame with that column
-  added (or overwritten if the name already exists) — everything else in the
-  frame passes through unchanged.
+  added (or overwritten if the name exists); everything else passes through.
+- Expressions in the *same* `.with_columns(a, b)` call are evaluated
+  independently against the input frame; they can't see each other's
+  output. Two with the same alias raise `DuplicateError`.
+- Collect expressions in a list and call `.with_columns(*exprs)` once rather
+  than chaining one `.with_columns()` per column in a loop: logically the
+  same, but the chained version builds a much deeper plan that's slower and
+  more memory-hungry at scale.
 
-### `.over(group)`
-- Like SQL's `OVER (PARTITION BY ...)`. Wraps *everything to its left in the
-  chain* and re-evaluates that expression separately within each group,
-  mapping results back to the original rows — it does not run "backwards" or
-  out of order, chaining is still strictly left-to-right, `.over()` just
-  changes the grouping context of what preceded it rather than transforming
-  a value like most chained calls do.
-- Placement matters: `pl.col("x").qcut(10, ...).over(g)` computes qcut
-  per-group; `pl.col("x").over(g).qcut(10, ...)` would (for a plain column
-  ref) leave qcut running globally, since `.over()` only wraps `pl.col("x")`.
+### Conditionals and constants
+- `pl.when(c1).then(v1).when(c2).then(v2).otherwise(default)` is a row-wise
+  if/elif/else (a vectorised switch). `.then()`/`.otherwise()` accept any
+  expression, like `np.where(cond, a, b)`.
+- **First match wins**: later `.when()`s only see unclaimed rows, so they
+  don't need to repeat earlier checks (e.g. null checks). A null condition
+  counts as no match.
+- `.otherwise(value)` instead of a final explicit `.when()` is shorter, but
+  unexpected values silently get that value; an explicit final branch plus
+  `.otherwise(None)` leaves them as visible nulls.
+- `pl.lit(x)` inserts a constant; `pl.concat_str(a, b, ...)` joins string
+  expressions row-wise.
+- `Expr.replace_strict(mapping, default=..., return_dtype=...)` maps values
+  through a dict (pandas' `.map(dict)`); the older `.replace()` implicit
+  dtype behaviour and `map_dict` are deprecated.
 
-### `pl.when` / `pl.lit` / `pl.concat_str`
-- `pl.when(cond).then(val).when(cond2).then(val2).otherwise(default)` is
-  Polars' row-wise if/elif/else.
-- `pl.lit(x)` inserts a constant value into an expression (as opposed to
-  reading a column).
-- `pl.concat_str(expr1, expr2, ...)` glues string expressions together
-  row-wise.
-
-### `.qcut(n, labels=[...])`
-- "Quantile cut" — splits a numeric column into `n` equal-sized buckets by
-  value and assigns each row the matching label (lowest values get the first
-  label, etc).
-
-### `group_by` / `.agg`
-- `frame.group_by([...])` alone does not return a LazyFrame — it returns an
-  intermediate `LazyGroupBy` object, conceptually "piles of rows" bucketed by
-  unique combinations of the group-by columns. Ragged/variable pile sizes
-  exist only transiently here; it can't be visualized as a frame because a
-  frame requires every column to line up row for row.
-- `.agg(...)` is what turns those piles back into a proper rectangular
-  table: it asks each pile a question that *reduces* it down to one row
-  (`pl.len()` for row count, `.mean()`, `.sum()`, `.min()`/`.max()`,
-  `.n_unique()`, `.first()`, or a bare `pl.col(...)` with no reducer to get a
-  list-typed cell holding the whole pile). A list of expressions can be
-  passed to compute several aggregates over the same groups at once.
-- `pl.len()` is row count (like SQL `COUNT(*)`), not the length of a
-  specific column.
-
-### `.collect()` and return-type conventions in this file
-- Functions that stay lazy (return `pl.LazyFrame`) are meant to be chained
-  further by the caller; a function that calls `.collect()` and returns
-  `pl.DataFrame` is written as a pipeline *endpoint* — actual numbers, not a
-  plan to extend. `.collect()` is also where Polars' query optimizer decides
-  the efficient execution plan (e.g. avoiding materializing columns that end
-  up dropped later), matching the earlier `sink_parquet` lesson from `io.py`.
-
-## Jupyter/IPython display
-- A cell only auto-displays the value of its last top-level statement, and
-  only if that statement is a bare expression. A `for` loop is a statement,
-  not an expression — it has no value to display, so plot objects created
-  inside a loop body are silently discarded, not just the last one.
-- `IPython` is the interactive shell Jupyter's kernel is built on; it adds
-  rich output rendering, tab completion, magics, etc. on top of plain Python.
-- `IPython.display.display(obj)` manually triggers the same rich-rendering
-  Jupyter does automatically for a cell's last expression — usable anywhere,
-  any number of times, e.g. inside a loop: `display(plot_factor(...))`.
-
-## `repr()` vs `print()`/`str()`
-- `repr()` gives the unambiguous, "developer-facing" representation of a
-  value, showing things `str()`/`print()` hide — e.g. quote boundaries, so
-  `repr("Germany ")` reveals the trailing space as `'Germany '` where
-  `print("Germany ")` would just show `Germany `.
-
-## Debugging a blank/empty result
-- Work outward from the smallest suspect piece rather than guessing: check
-  the raw filter alone before blaming a wrapper function, `repr()` a value
-  before assuming a string mismatch, and check upstream data
-  (`is_not_null()` on the specific column) before assuming the plotting
-  code is wrong. Sometimes the "bug" is a genuine gap in the source data
-  (e.g. a survey question not asked in a particular country).
-
-## Polars `group_by` / percentage-within-group pattern
-- `frame.group_by([key, group]).agg(pl.len().alias("n"))` counts rows per
-  combination of `key` and `group`.
-- `.with_columns((pl.col("n") / pl.col("n").sum().over(group) * 100).alias("pct"))`
-  turns those counts into percentages *within* each `group` (`.over(...)`
-  computes the denominator per group without collapsing rows) — needed
-  whenever groups (e.g. countries) have different total respondent counts,
-  so raw counts alone aren't comparable.
-- `pl.count()` is deprecated in favour of `pl.len()`.
-
-## Concepts covered while reading `src/pisa_py/build_parquet.py`
-
-### Eager vs lazy conversion
-- `pl.from_dataframe(pandas_df)` / `pl.LazyFrame(pandas_df)` isn't always
-  zero-copy — if even one column has an incompatible memory layout (e.g. a
-  pandas `object`/string column mixed among float64 columns), Polars falls
-  back to copying the *entire* frame, not just the incompatible columns.
-- Wrapping an already-fully-loaded pandas DataFrame in `pl.LazyFrame(...)`
-  doesn't make the underlying data lazy — laziness only covers operations
-  from that point forward; the source is already fully materialized. A
-  genuine lazy *source* (e.g. `scan_parquet`, or a purpose-built file
-  scanner) is a different thing from lazily wrapping already-eager data.
-
-### `Expr.replace_strict()`
-- The current Polars way to map values through a dict (pandas' `.map(dict)`
-  equivalent); plain `.replace()`'s implicit-dtype behavior and the older
-  `map_dict` are both deprecated/being phased out.
-- `default=` controls what happens for values not found in the mapping;
-  `return_dtype=` fixes the output type explicitly when branches would
-  otherwise produce mismatched types (e.g. raw numbers vs. category labels).
-
-### `pl.when/then/otherwise` composing with other expressions
-- `.then()`/`.otherwise()` accept any expression, not just literals — a
-  whole `pl.col(...).replace_strict(...)` chain can sit inside a branch,
-  mirroring `np.where(cond, a, b)`'s three-part shape.
-- Multiple expressions passed to the *same* `.with_columns(expr1, expr2, ...)`
-  call are evaluated independently against the same input frame — they
-  don't see each other's output, so argument order doesn't affect
-  correctness, only column order in the result.
-
-### `pl.Enum` vs `pl.Categorical` vs plain `Utf8`/`String`
-- A plain string column stores full text per row, repeated — for a column
-  with a small fixed set of repeated values (e.g. a handful of survey
-  labels repeated across hundreds of thousands of rows), this can cost
-  3-4x more memory than a compact/dictionary-style encoding.
-- `pl.Enum(categories)` needs a *unique* list of category values —
-  `list(dict.fromkeys(values))` dedupes while preserving order, reusing the
-  dedup trick from `io.py`. The dedup only applies to the category
-  vocabulary; the original mapping dict (which may have several keys
-  sharing one label) is untouched and still works correctly.
-- Mixing dtypes across `when/then/otherwise` branches (e.g. a numeric
-  fallback vs. an Enum-typed match) forces Polars to reconcile types —
-  sometimes via an implicit, deprecated cast. Choosing `default=`/
-  `return_dtype=` conditionally per-branch, matching the actual shape of
-  the data, avoids the deprecated path entirely rather than just
+### Dtypes
+- A plain `String` column stores the full text per row; for a few values
+  repeated across many rows, `pl.Enum(categories)` (fixed, ordered
+  vocabulary) or `pl.Categorical` is several times smaller.
+- `pl.Enum` needs a unique category list (`list(dict.fromkeys(values))`).
+- Mixing dtypes across `when/then/otherwise` branches forces Polars to
+  reconcile types, sometimes via a deprecated implicit cast. Set
+  `default=`/`return_dtype=` so each branch has the right type, rather than
   suppressing the warning.
+- A column with no non-null values gets dtype `Null` (nothing to infer
+  from). It can't hold any value, so mapping (`replace_strict`) fails
+  ("conversion from `f64` to `null` failed"), and so does stacking it with
+  a `Float64` piece ("type Float64 is incompatible with expected type
+  Null").
+- `df.cast({col: dtype, ...})` casts many columns at once. Like most frame
+  methods it returns a *new* frame, so reassign: `df = df.cast(...)` (fine
+  for mypy, since the type stays `DataFrame`).
+- Python ints become Int64 by default, but integer literals in
+  `when/then/otherwise` land on Int32. Pin dtypes deliberately with
+  `.cast()` at the end (e.g. Int8 for -1/0/1; it must be signed, since UInt8
+  can't hold -1).
 
-### Chained vs batched `.with_columns()`
-- Calling `.with_columns()` once per column inside a loop builds a much
-  deeper query plan than collecting all the expressions into one list and
-  calling `.with_columns(*all_exprs)` a single time — measurably slower and
-  more memory-hungry at scale, even though both are logically equivalent.
+### Grouping and window functions
+- `frame.group_by([...])` returns an intermediate `GroupBy`: "piles of rows"
+  per unique key combination, not a frame (piles have different sizes).
+- `.agg(...)` reduces each pile to one row: `pl.len()` (row count, like SQL
+  `COUNT(*)`; `pl.count()` is deprecated), `.mean()`, `.sum()`,
+  `.min()`/`.max()`, `.n_unique()`, `.first()`, or a bare `pl.col(...)` for a
+  list-typed cell of the whole pile. Several aggregates can be passed at once.
+- `.over(group)` is SQL's `OVER (PARTITION BY ...)`: it re-evaluates
+  everything to its left in the chain within each group and maps results
+  back to the original rows, without collapsing them. Placement matters:
+  `pl.col("x").qcut(10).over(g)` is per group; `pl.col("x").over(g).qcut(10)`
+  is global.
+- `.qcut(n, labels=[...])` splits a numeric column into `n` equal-sized
+  quantile buckets.
+- Percentage within group: `group_by([key, group]).agg(pl.len().alias("n"))`
+  then `(pl.col("n") / pl.col("n").sum().over(group) * 100)`. Needed when
+  groups have different totals, so raw counts aren't comparable.
 
-### `sink_parquet()` and its `engine=` parameter
-- `sink_parquet` doesn't automatically guarantee streaming execution — its
-  `engine="auto"` default can silently pick the in-memory engine,
-  materializing the whole result before writing anything, which shows up as
-  "no disk writes at all until near the end" on a live resource monitor.
-- Forcing `engine="streaming"` explicitly doesn't guarantee every operation
-  in a query plan actually streams either — a feature can still add far
-  more memory overhead than expected even under a genuinely-streaming
-  engine, if its own implementation isn't optimized for the shape of data
-  involved (e.g. an unusually wide, many-column schema).
+### Lazy vs eager execution
+- `pl.scan_parquet(...)` returns a `LazyFrame`: a plan over the file, not
+  loaded data, so column selection and filters can be pushed down to the
+  reader.
+- `.collect()` runs the plan (letting the optimiser skip unneeded work) and
+  returns a `DataFrame`. Convention: functions returning a `LazyFrame` are
+  meant to be chained further; a function that collects is a pipeline
+  endpoint.
+- `.sink_parquet(...)` executes a plan and writes to disk. Its
+  `engine="auto"` default can silently pick the in-memory engine (no disk
+  writes until near the end); pass `engine="streaming"` to stream. Even then,
+  some operations may not stream efficiently for unusual shapes (e.g. very
+  wide schemas).
+- Wrapping already-loaded data in `pl.LazyFrame(...)` only makes later
+  operations lazy; the source is still fully in memory. A genuine lazy
+  *source* (`scan_*`) is different.
+- Converting from pandas (`pl.from_dataframe`, `pl.LazyFrame(pandas_df)`)
+  isn't always zero-copy: one incompatible column (e.g. `object` dtype)
+  makes Polars copy the *entire* frame.
 
-### Debugging a memory crash methodically
-- "Runs without error" isn't the same as "correct" or "efficient" — check
-  actual dtypes and values (e.g. via a data viewer), not just the absence
-  of an exception. The eventual root cause this session was exactly this:
-  code that ran fine and produced correct values for months, just with a
-  quietly wasteful dtype nobody had checked.
-- Isolate variables one at a time (row batching vs. column batching,
-  chained vs. batched calls, engine choice, individual library features)
-  using synthetic data at matching scale, rather than changing several
-  things at once and guessing which one mattered.
-- A library's own benchmark claims (e.g. "under 1GB RAM for 500GB files")
-  may be measured on a much simpler case than your own — don't assume it
-  transfers without checking against your specific shape of data.
+### Batched parquet (folder datasets)
+- To keep memory bounded: read a chunk, transform it, write it as its own
+  file (`folder / f"part-{n}.parquet"`), move on. Peak memory is about one
+  chunk.
+- `pl.scan_parquet(folder)` reads every parquet file in it as one table;
+  downstream code can't tell the difference from a single file.
+- All parts must have identical schemas, so cast each chunk to a fixed
+  dtype per column rather than trusting per-chunk inference.
+- Rerunning only overwrites parts with the same names. If the chunk size
+  changes and there are fewer parts, the old extras stay and get read twice.
+  Clear the folder first.
+- Delete superseded output files so a missed path fails loudly rather than
+  silently reading stale data.
 
-### Git / GitHub pull request workflow
-- Fork → clone the fork (not the original repo) → create a branch → commit
-  → push to `origin` (your fork), not `upstream` (the original repo) →
-  open the PR from your fork's branch targeting `upstream`'s main branch.
-- `git add` stages a change (silent on success — check with `git status`,
-  not the absence of output); `git commit` is the separate step that
-  actually records it. Splitting them lets you choose exactly what goes
-  into a commit.
-- A PR description carries the *why*; a code comment isn't needed when the
-  diff itself is self-explanatory (e.g. a one-line consistency fix
-  mirroring an existing pattern elsewhere in the same file).
+### Schema and file metadata
+- `lf.collect_schema().names()` lists column names cheaply; use it to check a
+  column exists before selecting it.
+- Row counts aren't free metadata: `lf.select(pl.len()).collect().item()` is
+  a real (if cheap) computation.
+- `pyarrow.parquet.ParquetFile(path).metadata` gives per-column-chunk detail;
+  summing `.total_compressed_size` across row groups shows which columns
+  dominate file size. When a file "feels too big", break it down by column
+  group first; a few wide, repetitive groups often account for most of it.
 
-## Concepts covered while writing `src/pisa_py/make.py`
+### Comparing frames in tests
+- `LazyFrame == LazyFrame` isn't allowed (plans, not data).
+  `DataFrame == DataFrame` gives a frame of bools, so `assert` on it raises
+  "truth value is ambiguous".
+- Use `polars.testing.assert_frame_equal(actual, expected)`: one pass/fail, a
+  clear diff, nulls in the same place count as equal, and dtypes are checked
+  (`check_dtypes=False` to skip, but usually you want it).
+- When building test frames, `schema=` must name *every* column;
+  `schema_overrides=` sets only the ones listed. `10.0` gives Float64 without
+  either. Make test input dtypes match the real data.
 
-### `LazyFrame.collect_schema().names()` for existence checks
-- Same method used in `build_parquet.py`'s for-loop, reused here for a
-  different purpose: check whether a *derived* column name
-  (`f"{col}_missing_reason"`) actually exists in the file before trying to
-  `.select()` it, rather than hardcoding which source columns happen to
-  have missing-reason siblings (e.g. ID columns like `CNT` never do).
-  Computing this from the real schema means the logic keeps working if the
-  underlying data file changes, instead of silently going stale.
+### Reading SPSS with pyreadstat
+- `pyreadstat.read_file_in_chunks(read_sav, path, chunksize=..., limit=...,
+  **kwargs)` is a generator of `(df, meta)` chunks; extra keyword arguments
+  pass through to `read_sav`. `limit=` stops early for quick test runs.
+- `meta` describes the whole file (labels, missing ranges, column names), so
+  it's the same for every chunk. `read_sav(path, metadataonly=True)` reads
+  only that, cheaply.
+- `meta.readstat_variable_types` maps column → `"double"` / `"string"`: the
+  intended type, regardless of what's in a given slice.
+- `multiprocess=True` splits each chunk *again* across workers and stacks
+  the pieces back together. On sparse columns, tiny pieces come back
+  all-null and the stacking fails, and the crash happens before your code
+  ever sees the chunk.
+- `apply_value_formats=True` replaces codes with their labels (numbers
+  become text categories). Not wanted when your own code needs the raw
+  codes (e.g. to separate missing codes from real values).
+- Parallelising safely means one *whole* chunk per worker
+  (`read_sav(row_offset=..., row_limit=...)` → cast → transform → write its
+  own part), so nothing is ever stacked. `ProcessPoolExecutor` needs the
+  worker function at module level, and memory scales with the number of
+  workers. (Discussed, not built.)
 
-### List concatenation vs. plain addition
-- `some_list + f"{x}"` raises `TypeError: can only concatenate list (not
-  "str") to list` — `+` between a list and anything else requires both
-  sides to be lists. Wrapping the single item in brackets
-  (`some_list + [f"{x}"]`) makes it a one-element list, which concatenates
-  fine. `list.append(x)` is the other option, but mutates in place instead
-  of producing a new list.
+## 7. Jupyter / IPython
 
-### Name binding vs. copying for lists
-- `schcols = SCHOOL_COLS` does not copy the list — `schcols` and the
-  module-level `SCHOOL_COLS` point at the *same* list object. `schcols =
-  schcols + [...]` doesn't mutate that shared object though: `+` builds a
-  brand new list and rebinds the name `schcols` to it, leaving the original
-  `SCHOOL_COLS` untouched. (`.append()` would have mutated the shared
-  object in place instead — worth knowing which one a given pattern does.)
-- Mutating the name bound inside a `for col in stucols:` loop (via
-  reassignment, not in-place mutation) doesn't break the loop or cause
-  infinite iteration — the loop's iterator was already created over the
-  original list object when the loop started; rebinding the name `stucols`
-  partway through doesn't change what the iterator walks.
+- IPython is the interactive shell Jupyter's kernel is built on (rich output,
+  tab completion, magics).
+- A cell auto-displays only the value of its last top-level statement, and
+  only if it's a bare expression. Objects created inside a `for` loop are
+  never displayed.
+- `IPython.display.display(obj)` triggers that rich rendering manually,
+  anywhere and any number of times (e.g. inside a loop).
 
-### Deriving one rename dict from another
-- Pattern: give the raw→friendly rename dict a variable name
-  (`rename_map = {...}`) instead of writing it as an inline literal, so it
-  can be read back later. Then loop over the columns being selected, and
-  for any raw name that both (a) has a `_missing_reason` sibling in the
-  schema and (b) already has an entry in `rename_map`, add a matching
-  `f"{raw}_missing_reason": f"{friendly}_missing_reason"` entry via
-  `rename_map.update(...)`. Keeps the derived columns' names in sync with
-  their base column's friendly name without typing every pair by hand.
+## 8. Tooling
 
-### Inspecting a parquet file's per-column size
-- `pyarrow.parquet.ParquetFile(path).metadata` exposes row-group/column
-  detail that plain `polars` schema/row-count calls don't — each column
-  chunk's `.total_compressed_size` can be summed across row groups to see
-  which columns actually dominate a file's size on disk.
-- Applied here: in a 160MB export, the 80 replicate-weight columns
-  (`W_FSTURWT*`) alone accounted for ~96MB (60%) — more than the 30
-  plausible-value columns and far more than the handful of demographic
-  columns and their `_missing_reason` siblings (~0.4MB total) combined.
-  A file "feeling too big" is worth breaking down by column group before
-  assuming something's wrong — sometimes it's just that a few wide,
-  boilerplate column groups (replicate weights, here) genuinely dominate.
+### uv
+- `uv run <program>` runs it in the project environment: `uv run pytest`,
+  `uv run python -m pkg.module`.
+- `uv add`/`uv remove` update `pyproject.toml`, `uv.lock` and `.venv`
+  together; hand-editing the toml leaves them out of sync until `uv sync`
+  (and leftover comments need deleting by hand).
+- `[project.optional-dependencies]` extras only install when requested
+  (`--extra dev`), so a sync can silently uninstall dev tools.
+  `[dependency-groups] dev` installs by default.
+- `.python-version` pins the interpreter (`uv python pin 3.12`); without it
+  uv may pick its own downloaded Python.
+- Virtual environments store absolute paths: after moving a project,
+  recreate `.venv` (`uv sync`) and open new terminals (old ones show a stale
+  `VIRTUAL_ENV` warning).
 
-## Concepts covered while writing `src/pisa_py/build_features_parquet.py`
+### VS Code
+- `.vscode/settings.json` only applies from the folder that's open, so a
+  nested project doesn't get its settings.
+- F2 (Rename Symbol) renames by meaning, respecting scope and updating
+  imports across files (skips comments/strings); Shift+Enter previews.
+  Shift+F12 finds all references.
 
-### Chained `pl.when/then` as a vectorised switch-case
-- `.when()`/`.then()` pairs can be chained as many times as needed before
-  `.otherwise()` — Polars' row-wise if/elif/elif/else.
-- Branches are tried in order and the **first match wins**: a later
-  `.when()` only ever sees rows that no earlier branch claimed. So a later
-  branch doesn't need to repeat checks (e.g. null checks) that an earlier
-  branch already handled.
-- Once the earlier branches have peeled off every special case,
-  `.otherwise(value)` can replace a final explicit `.when()`. Trade-off:
-  shorter, but any unexpected value (e.g. a category that used to be
-  nulled out) silently gets that value; an explicit final branch +
-  `.otherwise(None)` leaves unexpected rows as visible nulls instead.
-- Building each flag as a standalone expression, collecting them in a
-  list, and doing one `.with_columns(*exprs)` at the end keeps the query
-  plan shallow (same lesson as chained vs batched `.with_columns()`).
-- Two expressions with the same `.alias()` in one `.with_columns()` call
-  raises a `DuplicateError` — watch for copy-pasted aliases.
-
-### `=` vs `==` inside a call
-- Inside a function call's parentheses, `name=value` is keyword-argument
-  syntax, so `pl.when(pl.col("x") = "a")` fails with "expected a parameter
-  name" — the comparison needs `==`.
-- Python has no `===`/`!==` (that's JavaScript); `==`/`!=` are all there is.
-
-### `&` / `|` vs `and` / `or`
-- Python has no `&&`/`||`. `and`/`or`/`not` work on single True/False
-  values; `&`/`|`/`~` are bitwise operators that Polars overloads to work
-  row-by-row on boolean expressions. Each side needs its own parentheses,
-  because `&`/`|` bind more tightly than `==`.
-
-### Methods vs method calls
-- `expr.is_null` (no brackets) is valid Python — it evaluates to the
-  method object itself, not a result. Polars then errors with "cannot
-  create expression literal for value of type method". The `()` is what
-  actually calls it.
-- `.is_null()` on an expression returns another expression (a per-row
-  boolean mask), not a single True/False.
-
-### Functions are first-class objects
-- A function is a value like any other: it can be bound to another name
-  (`hog = print; hog("dog")`), stored in a dict/list, or passed into
-  another function — e.g. `sorted(words, key=len)`, pandas `.apply(func)`,
-  same idea as R's `sapply(x, mean)` / `purrr::map(x, mean)`.
-- Polars expressions are values too, so a helper function can take
-  expressions (conditions) as arguments.
-
-### Null in comparisons: three-valued logic
-- Plain Python: `None == "Male"` is `False`, `None != "Male"` is `True`.
-- Polars (like SQL, and R's `NA`) treats null as "unknown": any comparison
-  with null gives null, and a null `when` condition counts as no match.
-- `&`/`|` with null follow the "does the unknown matter?" rule:
-  `null | True` → `True`, `null | False` → null, `null & False` → `False`,
-  `null & True` → null.
-- `.is_null()` / `.is_not_null()` are the way to get a definite
-  True/False about nulls.
-
-### `list.append` vs `list.extend`
-- `.extend(iterable)` adds each item *of* a collection (used in
-  `build_parquet.py` because `add_missing_reasons` returns a list of
-  expressions). `.append(item)` adds one item. Passing a single `pl.Expr`
-  to `.extend()` fails with `TypeError: 'Expr' object is not iterable`.
-
-### Check the actual values before writing parsing logic
-- Before reaching for regex/string-stripping, look at what an Enum column
-  really contains (`group_by(col).len()`). Here `*_education_highest`
-  (PISA ST005/ST007) only covers *schooling* levels (all ISCED 3.4 or
-  below) — degrees are separate questions — so no number extraction was
-  needed, and "highest schooling 3.4 + has a PhD" is consistent, not a
-  contradiction. ISCED 3.3 (OECD: "upper secondary with no direct access
-  to tertiary education") or below + PhD is the real contradiction.
+### Git / GitHub
+- `git add` stages (silent on success; check with `git status`), `git commit`
+  records. Splitting them lets you choose exactly what goes in a commit.
+- Contributing via PR: fork → clone *your fork* → branch → commit → push to
+  `origin` (your fork), not `upstream` → open the PR from your fork's branch
+  against `upstream`'s main.

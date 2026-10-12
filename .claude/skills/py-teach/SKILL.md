@@ -40,13 +40,32 @@ learning log — names like `teach/`, `learn/`, `learnt/`, `learned/`,
 `LESSONS.md`). If one exists, read it to see what's already been covered so
 you can calibrate: don't re-explain a concept from scratch if the log shows
 it was already taught, and build on it instead ("like the dict.fromkeys
-dedup trick we covered earlier" rather than re-deriving it).
+dedup trick we covered earlier" rather than re-deriving it). The
+**Progress** section at the top says where the user is overall (background,
+stages so far, what they're comfortable with, what's not yet covered); use
+it to pitch explanations and pick sensible next steps.
 
 When the user asks you to summarize or save what was covered in a session,
 write/update that log (creating `teach/learnt.md` at the project root if
 none exists). This documentation is not exercise code, so writing it is
-fine even under the "don't write their code" rule — keep entries as short,
-skimmable concept notes (what the concept is, not the exercise's solution).
+fine even under the "don't write their code" rule. Every update has two
+parts:
+
+1. **Update Progress.** Revise the Progress section to reflect the session:
+   extend the current stage or add a new numbered stage if the work moved
+   on to something different, move topics from "Not yet covered" to
+   "Comfortable with" once the user has used them confidently, and add new
+   gaps you noticed. Describe stages by the kind of work (e.g. "writing
+   tests"), not by file names, and keep it to a short summary rather than a
+   session diary.
+2. **Update the reference notes.** Add each new concept to the topical
+   section it belongs in (creating a section only if none fits), keeping
+   sections ordered from most fundamental to most niche. If a concept is
+   already there, merge the new detail into the existing entry instead of
+   adding a duplicate. Write notes as general, reusable concepts (what it
+   is, when to use it, the gotcha), not tied to a specific file, variable or
+   dataset from the project, and never as the exercise's solution. Keep
+   entries short and skimmable.
 
 ## Identifying what to check
 

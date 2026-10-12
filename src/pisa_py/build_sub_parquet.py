@@ -11,8 +11,8 @@ import polars as pl
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
 
-STUDENT_SURVEY_FULL = DATA_DIR / "built" / "student_22.parquet"
-SCHOOL_SURVEY_FULL = DATA_DIR / "built" / "school_22.parquet"
+STUDENT_SURVEY_FULL = DATA_DIR / "built" / "student_22"
+SCHOOL_SURVEY_FULL = DATA_DIR / "built" / "school_22"
 
 # region Column groupings
 # PLausible values for all three domains
@@ -35,6 +35,7 @@ ID_COLS: list[str] = [
 DEMOGRAPHIC_COLS: list[str] = [
     "ST004D01T",  # Student (standardised) gender
     "ESCS",  # Economic, social and cultural status (standardised)
+    "HOMEPOS", # OECD measure of home wealth.
 ]
 
 # Parental education information. A parent with a PhD should have completed a degree.
@@ -132,7 +133,9 @@ def build_student(path: Path = STUDENT_SURVEY_FULL) -> pl.LazyFrame:
 
 
 def main() -> None:
+    print("Joining parquets")
     jndf = build_student().join(build_school(), on="CNTSCHID", how="left")
+    print("Sinking file")
     jndf.sink_parquet(
         f"{DATA_DIR}/built/sch_stu_sub.parquet",
         engine="streaming",
